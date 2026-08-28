@@ -1,0 +1,89 @@
+import { useState, type FormEvent } from "react";
+import { Link, Navigate, useNavigate } from "react-router-dom";
+import { api } from "../api";
+import { ShopBrand } from "../components/ShopBrand";
+import { useShop } from "../context/ShopContext";
+import { isStaffLoggedIn, saveSession } from "../lib/session";
+
+export function StaffLoginPage() {
+  const navigate = useNavigate();
+  const { shop } = useShop();
+  const [username, setUsername] = useState("staff");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  if (isStaffLoggedIn()) {
+    return <Navigate to="/staff" replace />;
+  }
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const session = await api.login({ username, password });
+      if (session.role !== "staff") {
+        setError("ບັນຊີນີ້ບໍ່ແມ່ນພະນັກງານ.");
+        return;
+      }
+      saveSession(session);
+      navigate("/staff", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ເຂົ້າສູ່ລະບົບບໍ່ສຳເລັດ.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-[#fff7ed] px-5">
+      <form onSubmit={(event) => void onSubmit(event)} className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-sm">
+        <ShopBrand
+          className={shop.logo ? "flex-col items-start gap-3" : ""}
+          logoClassName="h-14 w-14 rounded-full object-cover"
+          nameClassName="text-xs font-semibold text-orange-700"
+        />
+        <h1 className="font-display mt-2 text-3xl text-stone-900">ພະນັກງານ</h1>
+        <p className="mt-2 text-sm text-stone-500">ເຂົ້າສູ່ລະບົບເພື່ອຮັບການເອີ້ນຈາກໂຕະ</p>
+        <label className="mt-6 block text-sm font-medium text-stone-700">
+          ຊື່ຜູ້ໃຊ້
+          <input
+            value={username}
+            onChange={(event) => {
+              setUsername(event.target.value);
+              setError("");
+            }}
+            autoComplete="username"
+            className="mt-1 w-full rounded-2xl border border-stone-200 px-4 py-3 outline-none focus:border-orange-500"
+          />
+        </label>
+        <label className="mt-3 block text-sm font-medium text-stone-700">
+          ລະຫັດຜ່ານ
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              setError("");
+            }}
+            autoFocus
+            autoComplete="current-password"
+            className="mt-1 w-full rounded-2xl border border-stone-200 px-4 py-3 outline-none focus:border-orange-500"
+          />
+        </label>
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        <button
+          type="submit"
+          disabled={submitting}
+          className="mt-5 w-full rounded-2xl bg-orange-600 py-3 font-semibold text-white disabled:opacity-60"
+        >
+          {submitting ? "ກຳລັງເຂົ້າ..." : "ເຂົ້າສູ່ລະບົບ"}
+        </button>
+        <Link to="/admin/login" className="mt-4 block text-center text-sm text-stone-400 underline">
+          ເຈົ້າຂອງຮ້ານ · ແຜງຄວບຄຸມ
+        </Link>
+      </form>
+    </div>
+  );
+}

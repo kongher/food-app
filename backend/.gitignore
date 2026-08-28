@@ -1,0 +1,19 @@
+# Thư viện phụ thuộc
+node_modules/
+
+# Bản dựng (Build)
+dist/
+build/
+.output/
+
+# Các file môi trường bảo mật
+.env
+.env.local
+.env.*.local
+
+# Log và hệ thống
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+.vscode/

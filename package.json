@@ -1,0 +1,12 @@
+{
+  "name": "food-app",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta npm:dev:backend npm:dev:frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

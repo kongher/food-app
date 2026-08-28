@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans Lao", "Noto Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Noto Serif Lao", "Noto Serif", Georgia, serif;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: #fff7ed;
+  color: #1c1917;
+  line-height: 1.65;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
