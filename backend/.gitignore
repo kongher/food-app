@@ -5,6 +5,7 @@ node_modules/
 dist/
 build/
 .output/
+public/
 
 # Các file môi trường bảo mật
 .env

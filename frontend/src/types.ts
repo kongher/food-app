@@ -72,6 +72,7 @@ export interface DiningTable {
   number: number;
   status: TableOccupancy;
   occupied: boolean;
+  occupiedAt: string | null;
   hasOrder: boolean;
   hasCall: boolean;
   createdAt: string;

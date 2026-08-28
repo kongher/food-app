@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { ShopWelcome } from "../components/ShopWelcome";
 import { useCart } from "../context/CartContext";
@@ -45,7 +45,14 @@ export function CustomerMenu({
 }: Props) {
   const isStaff = variant === "staff";
   const [params, setSearchParams] = useSearchParams();
-  const tableFromUrl = Number(params.get("table"));
+  const routeParams = useParams();
+  const tableFromQuery = Number(params.get("table"));
+  const tableFromPath = Number(routeParams.tableNumber);
+  const tableFromUrl = isValidTableNumber(tableFromPath)
+    ? tableFromPath
+    : isValidTableNumber(tableFromQuery)
+      ? tableFromQuery
+      : NaN;
   const [staffTable, setStaffTable] = useState("");
   const tableNumber = isStaff
     ? Number(staffTable)
@@ -58,13 +65,16 @@ export function CustomerMenu({
     if (isStaff) return;
     if (isValidTableNumber(tableFromUrl)) {
       saveTableNumber(tableFromUrl);
+      if (!params.get("table")) {
+        setSearchParams({ table: String(tableFromUrl) }, { replace: true });
+      }
       return;
     }
     const saved = getSavedTableNumber();
     if (saved) {
       setSearchParams({ table: String(saved) }, { replace: true });
     }
-  }, [isStaff, tableFromUrl, setSearchParams]);
+  }, [isStaff, tableFromUrl, params, setSearchParams]);
 
   const [manualTable, setManualTable] = useState("");
   const [query, setQuery] = useState("");
@@ -322,7 +332,7 @@ export function CustomerMenu({
         <button
           type="button"
           onClick={() => setCartOpen(true)}
-          className="fixed right-3 bottom-3 left-3 z-30 mx-auto flex max-w-lg items-center justify-between rounded-2xl bg-stone-900 px-5 py-3.5 text-white shadow-[0_10px_30px_rgba(0,0,0,0.28)]"
+          className="fixed right-3 bottom-3 left-3 z-30 mx-auto flex max-w-lg items-center justify-between rounded-2xl bg-orange-600 px-5 py-3.5 text-white shadow-[0_10px_30px_rgba(234,88,12,0.35)]"
           style={{ marginBottom: "env(safe-area-inset-bottom)" }}
         >
           <span className="flex items-center gap-3">
@@ -335,7 +345,7 @@ export function CustomerMenu({
               >
                 <path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2M1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0 0 20.01 4H5.21l-.94-2zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2" />
               </svg>
-              <span className="absolute -top-0.5 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] leading-none font-bold text-white">
+              <span className="absolute -top-0.5 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-white px-1 text-[10px] leading-none font-bold text-orange-600">
                 {count}
               </span>
             </span>
@@ -475,7 +485,7 @@ export function CustomerMenu({
                   +
                 </button>
               </div>
-              <button onClick={confirmDraft} className="rounded-2xl bg-stone-900 px-5 py-3 font-semibold text-white">
+              <button onClick={confirmDraft} className="rounded-2xl bg-orange-600 px-5 py-3 font-semibold text-white">
                 ເພີ່ມ · {formatVnd(draftProduct.price * draftQty)}
               </button>
             </div>

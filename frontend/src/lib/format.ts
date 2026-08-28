@@ -11,6 +11,22 @@ export function formatTime(iso: string): string {
   return `${day}/${month}/${year}, ${time}`;
 }
 
+export function formatClock(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+export function formatElapsed(iso: string, now = Date.now()): string {
+  const start = new Date(iso).getTime();
+  if (Number.isNaN(start)) return "";
+  const minutes = Math.max(0, Math.floor((now - start) / 60_000));
+  if (minutes < 60) return `${minutes} ນາທີ`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} ຊົ່ວໂມງ ${rest} ນາທີ` : `${hours} ຊົ່ວໂມງ`;
+}
+
 export function isSameLocalDay(iso: string, now = new Date()): boolean {
   const date = new Date(iso);
   return (

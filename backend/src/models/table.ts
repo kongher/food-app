@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import mongoose, { Schema } from "mongoose";
 import type { DiningTable } from "../types.js";
 
-const tableSchema = new Schema<Pick<DiningTable, "id" | "number" | "occupied" | "createdAt">>(
+const tableSchema = new Schema<Pick<DiningTable, "id" | "number" | "occupied" | "occupiedAt" | "createdAt">>(
   {
     id: { type: String, required: true, unique: true },
     number: { type: Number, required: true, unique: true, min: 1 },
     occupied: { type: Boolean, default: false },
+    occupiedAt: { type: String, default: null },
     createdAt: { type: String, required: true },
   },
   { versionKey: false, collection: "tables" },
@@ -14,8 +15,16 @@ const tableSchema = new Schema<Pick<DiningTable, "id" | "number" | "occupied" | 
 
 export const TableModel = mongoose.model("DiningTable", tableSchema);
 
-export async function markTableOccupied(tableNumber: number): Promise<void> {
-  await TableModel.updateOne({ number: tableNumber }, { $set: { occupied: true } });
+export async function markTableOccupied(tableNumber: number, at = new Date().toISOString()): Promise<void> {
+  const started = await TableModel.updateOne(
+    { number: tableNumber, occupied: { $ne: true } },
+    { $set: { occupied: true, occupiedAt: at } },
+  );
+  if (started.matchedCount > 0) return;
+  await TableModel.updateOne(
+    { number: tableNumber, $or: [{ occupiedAt: null }, { occupiedAt: "" }, { occupiedAt: { $exists: false } }] },
+    { $set: { occupied: true, occupiedAt: at } },
+  );
 }
 
 const DEFAULT_TABLE_COUNT = 20;

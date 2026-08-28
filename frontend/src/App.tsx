@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import { api } from "./api";
 import { CartProvider } from "./context/CartContext";
 import { ShopProvider } from "./context/ShopContext";
@@ -32,6 +32,14 @@ export default function App() {
             </CartProvider>
           }
         />
+        <Route
+          path="/t/:tableNumber"
+          element={
+            <CartProvider>
+              <CustomerShell />
+            </CartProvider>
+          }
+        />
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route
           path="/admin"
@@ -50,10 +58,16 @@ export default function App() {
             </RequireStaff>
           }
         />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<RedirectHome />} />
       </Routes>
     </ShopProvider>
   );
+}
+
+function RedirectHome() {
+  const [params] = useSearchParams();
+  const table = params.get("table");
+  return <Navigate to={table ? `/?table=${encodeURIComponent(table)}` : "/"} replace />;
 }
 
 function CustomerShell() {

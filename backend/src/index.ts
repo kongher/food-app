@@ -65,8 +65,11 @@ app.use("/api", uploadsRouter);
 function frontendDist(): string | null {
   const candidates = [
     process.env.FRONTEND_DIST,
-    path.join(backendRoot, "..", "frontend", "dist"),
     path.join(backendRoot, "public"),
+    path.join(process.cwd(), "public"),
+    path.join(backendRoot, "..", "frontend", "dist"),
+    path.join(process.cwd(), "frontend", "dist"),
+    path.join(process.cwd(), "..", "frontend", "dist"),
   ].filter((value): value is string => Boolean(value));
 
   for (const dir of candidates) {
@@ -75,10 +78,16 @@ function frontendDist(): string | null {
   return null;
 }
 
+function sendFrontend(distDir: string, res: express.Response, next: express.NextFunction): void {
+  res.sendFile(path.join(distDir, "index.html"), (err) => {
+    if (err) next(err);
+  });
+}
+
 const dist = frontendDist();
 if (dist) {
-  app.use(express.static(dist));
-  app.use((req, res, next) => {
+  app.use(express.static(dist, { index: "index.html" }));
+  const serveSpa = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (req.method !== "GET" && req.method !== "HEAD") {
       next();
       return;
@@ -87,8 +96,10 @@ if (dist) {
       next();
       return;
     }
-    res.sendFile(path.join(dist, "index.html"));
-  });
+    sendFrontend(dist, res, next);
+  };
+  app.get("/", serveSpa);
+  app.get("/{*splat}", serveSpa);
 }
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -104,6 +115,9 @@ async function main(): Promise<void> {
     console.log(`Food-app API running at http://localhost:${port}`);
     console.log(`Cloudinary: ${isCloudinaryConfigured() ? "configured" : "missing env"}`);
     console.log(`Frontend: ${dist ?? "not bundled"}`);
+    if (!dist) {
+      console.warn("SPA files missing: QR /menu will 404. Build frontend into backend/public.");
+    }
   });
 
   const shutdown = async () => {

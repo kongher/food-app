@@ -107,7 +107,7 @@ ordersRouter.post("/orders", orderLimiter, async (req, res) => {
   };
 
   await OrderModel.create(order);
-  await markTableOccupied(order.tableNumber);
+  await markTableOccupied(order.tableNumber, order.createdAt);
   broadcastOrders({ type: "created", orderId: order.id, tableNumber: order.tableNumber });
   res.status(201).json(order);
 });

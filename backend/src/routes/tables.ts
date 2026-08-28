@@ -9,38 +9,66 @@ import type { DiningTable } from "../types.js";
 
 export const tablesRouter = Router();
 
-function asTable(doc: unknown, busy: { orders: Set<number>; calls: Set<number> }): DiningTable | null {
-  const row = toPublic<{ id: string; number: number; occupied?: boolean; createdAt: string }>(doc);
+type Occupancy = {
+  orders: Set<number>;
+  calls: Set<number>;
+  startedAt: Map<number, string>;
+};
+
+function asTable(doc: unknown, busy: Occupancy): DiningTable | null {
+  const row = toPublic<{ id: string; number: number; occupied?: boolean; occupiedAt?: string | null; createdAt: string }>(
+    doc,
+  );
   if (!row) return null;
   const number = Number(row.number);
   const occupied = Boolean(row.occupied) || busy.orders.has(number);
   const hasCall = busy.calls.has(number);
+  const storedAt = typeof row.occupiedAt === "string" && row.occupiedAt ? row.occupiedAt : null;
   return {
     id: row.id,
     number,
     status: occupied || hasCall ? "busy" : "empty",
     occupied,
+    occupiedAt: occupied ? storedAt || busy.startedAt.get(number) || null : null,
     hasOrder: occupied,
     hasCall,
     createdAt: row.createdAt,
   };
 }
 
-async function occupancy(): Promise<{ orders: Set<number>; calls: Set<number> }> {
-  const [orderNumbers, callNumbers] = await Promise.all([
-    OrderModel.distinct("tableNumber", { status: "pending" }),
+async function occupancy(): Promise<Occupancy> {
+  const [pendingOrders, callNumbers] = await Promise.all([
+    OrderModel.find({ status: "pending" }, { tableNumber: 1, createdAt: 1 }).lean(),
     StaffCallModel.distinct("tableNumber", { status: "pending" }),
   ]);
-  const orders = new Set(orderNumbers.map(Number));
-  if (orders.size > 0) {
-    await TableModel.updateMany(
-      { number: { $in: [...orders] }, occupied: { $ne: true } },
-      { $set: { occupied: true } },
-    );
+
+  const startedAt = new Map<number, string>();
+  for (const order of pendingOrders) {
+    const number = Number(order.tableNumber);
+    const createdAt = typeof order.createdAt === "string" ? order.createdAt : "";
+    if (!Number.isInteger(number) || !createdAt) continue;
+    const previous = startedAt.get(number);
+    if (!previous || createdAt < previous) startedAt.set(number, createdAt);
   }
+
+  const orders = new Set(startedAt.keys());
+  if (orders.size > 0) {
+    const ops = [...startedAt.entries()].map(([number, occupiedAt]) => ({
+      updateOne: {
+        filter: {
+          number,
+          $or: [{ occupied: { $ne: true } }, { occupiedAt: null }, { occupiedAt: "" }, { occupiedAt: { $exists: false } }],
+        },
+        update: { $set: { occupied: true, occupiedAt } },
+      },
+    }));
+    await TableModel.bulkWrite(ops);
+  }
+
   return {
     orders,
     calls: new Set(callNumbers.map(Number)),
+    startedAt,
   };
 }
 
@@ -70,6 +98,7 @@ tablesRouter.post("/tables", requireAdmin, async (req, res) => {
     id: randomUUID(),
     number,
     occupied: false,
+    occupiedAt: null,
     createdAt: new Date().toISOString(),
   };
   await TableModel.create(table);
@@ -85,7 +114,11 @@ tablesRouter.patch("/tables/:id", requireStaffOrAdmin, async (req, res) => {
     return;
   }
 
-  const updated = await TableModel.findOneAndUpdate({ id }, { $set: { occupied: false } }, { returnDocument: "after" }).lean();
+  const updated = await TableModel.findOneAndUpdate(
+    { id },
+    { $set: { occupied: false, occupiedAt: null } },
+    { returnDocument: "after" },
+  ).lean();
   if (!updated) {
     res.status(404).json({ error: "ບໍ່ພົບໂຕະນີ້." });
     return;

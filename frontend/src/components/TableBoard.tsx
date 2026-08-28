@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
+import { formatClock, formatElapsed } from "../lib/format";
 import { menuUrlForTable } from "../lib/tableSession";
 import type { DiningTable } from "../types";
 
@@ -15,7 +16,13 @@ interface BoardProps {
 export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDelete, onClear }: BoardProps) {
   const [draft, setDraft] = useState("");
   const [selected, setSelected] = useState<DiningTable | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const nextNumber = (tables.reduce((max, table) => Math.max(max, table.number), 0) || 0) + 1;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!selected) return;
@@ -24,7 +31,11 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
       setSelected(null);
       return;
     }
-    if (next.hasOrder !== selected.hasOrder || next.hasCall !== selected.hasCall) {
+    if (
+      next.hasOrder !== selected.hasOrder ||
+      next.hasCall !== selected.hasCall ||
+      next.occupiedAt !== selected.occupiedAt
+    ) {
       setSelected(next);
     }
   }, [tables, selected]);
@@ -89,6 +100,14 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
               }`}
             >
               <p className="font-display text-xl text-stone-900 sm:text-2xl">ໂຕະ {table.number}</p>
+              {table.hasOrder && table.occupiedAt ? (
+                <p className="mt-1 text-[11px] font-medium leading-tight text-orange-800 sm:text-xs">
+                  ເຂົ້າ {formatClock(table.occupiedAt)}
+                  <span className="mt-0.5 block text-[10px] font-normal text-orange-700/80 sm:text-[11px]">
+                    {formatElapsed(table.occupiedAt, now)}
+                  </span>
+                </p>
+              ) : null}
               <p
                 className={`mt-1 text-xs font-semibold sm:text-sm ${
                   table.hasCall ? "text-red-700" : table.hasOrder ? "text-orange-700" : "text-emerald-700"
@@ -103,6 +122,7 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
       {selected && (
         <TableQrModal
           table={selected}
+          now={now}
           onClose={() => setSelected(null)}
           onClear={onClear ? () => onClear(selected) : undefined}
           onDelete={onDelete ? () => onDelete(selected) : undefined}
@@ -114,11 +134,13 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
 
 function TableQrModal({
   table,
+  now,
   onClose,
   onClear,
   onDelete,
 }: {
   table: DiningTable;
+  now: number;
   onClose: () => void;
   onClear?: () => Promise<void>;
   onDelete?: () => Promise<void>;
@@ -199,7 +221,17 @@ function TableQrModal({
           ×
         </button>
         <p className="pr-10 font-display text-2xl text-stone-900">ໂຕະ {table.number}</p>
+        {table.hasOrder && table.occupiedAt ? (
+          <p className="mt-1 text-sm font-medium text-orange-800">
+            ເຂົ້າໂຕະ {formatClock(table.occupiedAt)} · {formatElapsed(table.occupiedAt, now)}
+          </p>
+        ) : null}
         <p className="mt-1 break-all text-xs text-stone-500">{url}</p>
+        {/https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(url) && (
+          <p className="mt-2 rounded-2xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            ສະແກນດ້ວຍມືຖືທີ່ເຊື່ອມ Wi-Fi ດຽວກັນກັບຮ້ານ. ຖ້າຍັງບໍ່ເປີດໄດ້, ອະນຸຍາດ Vite/Node ຜ່ານ Windows Firewall.
+          </p>
+        )}
         <div className="mt-4 flex justify-center rounded-3xl bg-stone-50 p-4">
           {dataUrl ? (
             <img src={dataUrl} alt={`QR ໂຕະ ${table.number}`} className="h-52 w-52" />
