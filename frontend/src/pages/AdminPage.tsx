@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../api";
+import { api, apiUrl } from "../api";
 import { DateInput } from "../components/DateInput";
 import { ShopBrand } from "../components/ShopBrand";
 import { StaffAccountsBoard } from "../components/StaffAccountsBoard";
@@ -181,7 +181,7 @@ export function AdminPage() {
     window.addEventListener("keydown", unlock, { once: true });
 
     const token = encodeURIComponent(getAuthToken());
-    const source = new EventSource(`/api/orders/stream?token=${token}`);
+    const source = new EventSource(apiUrl(`/api/orders/stream?token=${token}`));
     source.addEventListener("orders", (event: MessageEvent<string>) => {
       try {
         const payload = JSON.parse(event.data) as { type?: string; tableNumber?: number };

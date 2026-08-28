@@ -1,13 +1,14 @@
+import type { CorsOptions } from "cors";
 import type { Server as HttpServer } from "node:http";
 import { Server } from "socket.io";
 import { verifyAuthToken } from "./auth.js";
 
 let io: Server | null = null;
 
-export function initSocket(server: HttpServer): Server {
+export function initSocket(server: HttpServer, cors: Pick<CorsOptions, "origin">): Server {
   io = new Server(server, {
     cors: {
-      origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/],
+      origin: cors.origin,
       methods: ["GET", "POST"],
     },
   });

@@ -18,6 +18,25 @@ export type LoginResponse = {
   username: string;
 };
 
+const RENDER_API = "https://food-app-dg0b.onrender.com";
+
+export function getApiBase(): string {
+  const configured = (import.meta.env.VITE_API_URL ?? "").trim().replace(/\/$/, "");
+  if (configured) return configured;
+  if (import.meta.env.DEV) return "";
+  if (typeof window === "undefined") return RENDER_API;
+  const { hostname } = window.location;
+  if (hostname === "localhost" || hostname === "127.0.0.1") return RENDER_API;
+  if (hostname === "food-app-dg0b.onrender.com") return "";
+  return RENDER_API;
+}
+
+export function apiUrl(path: string): string {
+  const base = getApiBase();
+  if (!base || path.startsWith("http")) return path;
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 function authHeaders(json = true): HeadersInit {
   const headers: Record<string, string> = {};
   if (json) headers["Content-Type"] = "application/json";
@@ -27,7 +46,7 @@ function authHeaders(json = true): HeadersInit {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     ...init,
     headers: {
       ...authHeaders(!(init?.body instanceof FormData)),
@@ -50,7 +69,7 @@ export const api = {
   uploadImage: async (file: File): Promise<string> => {
     const body = new FormData();
     body.append("file", file);
-    const response = await fetch("/api/uploads", { method: "POST", body, headers: authHeaders(false) });
+    const response = await fetch(apiUrl("/api/uploads"), { method: "POST", body, headers: authHeaders(false) });
     const data = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
     if (!response.ok || !data.url) {
       throw new Error(data.error || "ອັບໂຫຼດຮູບບໍ່ສຳເລັດ.");
