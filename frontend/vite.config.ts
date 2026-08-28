@@ -8,7 +8,7 @@ function lanOrigin(port: number): string {
   for (const list of Object.values(os.networkInterfaces())) {
     for (const item of list ?? []) {
       if (item.internal) continue;
-      if (item.family !== "IPv4" && item.family !== 4) continue;
+      if (item.family !== "IPv4") continue;
       addresses.push(item.address);
     }
   }
