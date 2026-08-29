@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
-import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
+import { useEffect, useState, type ReactNode } from "react";
+import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { api } from "./api";
 import { CartProvider } from "./context/CartContext";
 import { ShopProvider } from "./context/ShopContext";
+import { isValidTableNumber, tableMenuPath } from "./lib/tableSession";
 import { AdminLoginPage } from "./pages/AdminLoginPage";
 import { AdminPage } from "./pages/AdminPage";
 import { CustomerMenu } from "./pages/CustomerPage";
@@ -12,34 +13,28 @@ import { StaffLoginPage } from "./pages/StaffLoginPage";
 import { StaffPage } from "./pages/StaffPage";
 import type { Category, Product } from "./types";
 
+function customerElement() {
+  return (
+    <CartProvider>
+      <CustomerShell />
+    </CartProvider>
+  );
+}
+
 export default function App() {
   return (
     <ShopProvider>
       <Routes>
         <Route
           path="/"
-          element={
-            <CartProvider>
-              <CustomerShell />
-            </CartProvider>
-          }
+          element={<LegacyQueryTableRedirect>{customerElement()}</LegacyQueryTableRedirect>}
         />
         <Route
           path="/menu"
-          element={
-            <CartProvider>
-              <CustomerShell />
-            </CartProvider>
-          }
+          element={<LegacyQueryTableRedirect>{customerElement()}</LegacyQueryTableRedirect>}
         />
-        <Route
-          path="/t/:tableNumber"
-          element={
-            <CartProvider>
-              <CustomerShell />
-            </CartProvider>
-          }
-        />
+        <Route path="/table/:id" element={customerElement()} />
+        <Route path="/t/:tableNumber" element={<LegacyPathTableRedirect />} />
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route
           path="/admin"
@@ -64,10 +59,30 @@ export default function App() {
   );
 }
 
+function tableFromQuery(params: URLSearchParams): number | null {
+  const table = Number(params.get("table"));
+  return isValidTableNumber(table) ? table : null;
+}
+
+function LegacyQueryTableRedirect({ children }: { children: ReactNode }) {
+  const [params] = useSearchParams();
+  const table = tableFromQuery(params);
+  if (table) return <Navigate to={tableMenuPath(table)} replace />;
+  return children;
+}
+
+function LegacyPathTableRedirect() {
+  const { tableNumber } = useParams();
+  const table = Number(tableNumber);
+  if (isValidTableNumber(table)) return <Navigate to={tableMenuPath(table)} replace />;
+  return <Navigate to="/" replace />;
+}
+
 function RedirectHome() {
   const [params] = useSearchParams();
-  const table = params.get("table");
-  return <Navigate to={table ? `/?table=${encodeURIComponent(table)}` : "/"} replace />;
+  const table = tableFromQuery(params);
+  if (table) return <Navigate to={tableMenuPath(table)} replace />;
+  return <Navigate to="/" replace />;
 }
 
 function CustomerShell() {

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { ShopWelcome } from "../components/ShopWelcome";
 import { CustomerBottomNav, type CustomerNavTab } from "../components/CustomerBottomNav";
 import { useCart } from "../context/CartContext";
 import { formatTime, formatVnd, onImgError } from "../lib/format";
 import { displayOrderCode } from "../lib/orderCode";
-import { getSavedTableNumber, isValidTableNumber, saveTableNumber } from "../lib/tableSession";
+import { isValidTableNumber, saveTableNumber, tableMenuPath } from "../lib/tableSession";
 import type { Category, Order, Product, PublicTableStatus, StaffCallReason } from "../types";
 
 const NOTE_PRESETS = [
@@ -65,37 +65,21 @@ export function CustomerMenu({
   variant = "customer",
 }: Props) {
   const isStaff = variant === "staff";
-  const [params, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const routeParams = useParams();
-  const tableFromQuery = Number(params.get("table"));
-  const tableFromPath = Number(routeParams.tableNumber);
-  const tableFromUrl = isValidTableNumber(tableFromPath)
-    ? tableFromPath
-    : isValidTableNumber(tableFromQuery)
-      ? tableFromQuery
-      : NaN;
+  const tableFromPath = Number(routeParams.id);
   const [staffTable, setStaffTable] = useState("");
   const tableNumber = isStaff
     ? Number(staffTable)
-    : isValidTableNumber(tableFromUrl)
-      ? tableFromUrl
-      : (getSavedTableNumber() ?? NaN);
+    : isValidTableNumber(tableFromPath)
+      ? tableFromPath
+      : NaN;
   const hasTable = isValidTableNumber(tableNumber);
 
   useEffect(() => {
-    if (isStaff) return;
-    if (isValidTableNumber(tableFromUrl)) {
-      saveTableNumber(tableFromUrl);
-      if (!params.get("table")) {
-        setSearchParams({ table: String(tableFromUrl) }, { replace: true });
-      }
-      return;
-    }
-    const saved = getSavedTableNumber();
-    if (saved) {
-      setSearchParams({ table: String(saved) }, { replace: true });
-    }
-  }, [isStaff, tableFromUrl, params, setSearchParams]);
+    if (isStaff || !isValidTableNumber(tableFromPath)) return;
+    saveTableNumber(tableFromPath);
+  }, [isStaff, tableFromPath]);
 
   const [manualTable, setManualTable] = useState("");
   const [query, setQuery] = useState("");
@@ -294,6 +278,10 @@ export function CustomerMenu({
     }
   }
 
+  if (!isStaff && routeParams.id != null && !isValidTableNumber(tableFromPath)) {
+    return <Navigate to="/" replace />;
+  }
+
   if (!hasTable && !isStaff) {
     return (
       <div className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center px-5">
@@ -309,7 +297,7 @@ export function CustomerMenu({
             const n = Number(manualTable);
             if (isValidTableNumber(n)) {
               saveTableNumber(n);
-              setSearchParams({ table: String(n) });
+              navigate(tableMenuPath(n));
             }
           }}
         >

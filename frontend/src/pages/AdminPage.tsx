@@ -593,7 +593,7 @@ export function AdminPage() {
             <h1 className="font-display text-2xl text-stone-900">ແຜງຄວບຄຸມຮ້ານ</h1>
           </div>
           <div className="flex items-center gap-2">
-            <Link to="/?table=1" className="rounded-full border border-stone-200 bg-white px-3 py-1 text-sm text-stone-800">
+            <Link to="/" className="rounded-full border border-stone-200 bg-white px-3 py-1 text-sm text-stone-800">
               ເບິ່ງເມນູລູກຄ້າ
             </Link>
             <button

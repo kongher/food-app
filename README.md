@@ -19,7 +19,8 @@ npm run dev
 ```
 
 - Backend API: http://localhost:3000
-- Frontend khách: http://localhost:5173/?table=3
+- Frontend khách (bàn 3): http://localhost:5173/table/3
+- Trang gốc (không gán bàn): http://localhost:5173/
 - Frontend quản trị: http://localhost:5173/admin
 
 Hoặc mở 2 terminal:

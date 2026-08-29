@@ -37,6 +37,10 @@ export function menuOrigin(): string {
   return PRODUCTION_ORIGIN;
 }
 
+export function tableMenuPath(tableNumber: number): string {
+  return `/table/${tableNumber}`;
+}
+
 export function menuUrlForTable(tableNumber: number): string {
-  return `${menuOrigin()}/?table=${tableNumber}`;
+  return `${menuOrigin()}${tableMenuPath(tableNumber)}`;
 }
