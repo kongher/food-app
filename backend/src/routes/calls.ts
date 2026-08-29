@@ -2,9 +2,10 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { randomUUID } from "node:crypto";
 import { broadcastCalls } from "../events.js";
-import { requireStaffOrAdmin } from "../lib/auth.js";
+import { getRequestAuth, requireStaffOrAdmin } from "../lib/auth.js";
 import { toPublic } from "../lib/serialize.js";
-import { StaffCallModel } from "../models/index.js";
+import { StaffCallModel, TableModel } from "../models/index.js";
+import { guestAccessError } from "../models/table.js";
 import type { StaffCall, StaffCallReason, StaffCallStatus } from "../types.js";
 
 export const CALL_REASON_LABELS: Record<StaffCallReason, string> = {
@@ -88,6 +89,19 @@ callsRouter.post("/calls", callLimiter, async (req, res) => {
     res.status(400).json({ error: "ເລກໂຕະບໍ່ຖືກຕ້ອງ." });
     return;
   }
+
+  const table = await TableModel.findOne({ number: tableNumber }).lean();
+  if (!getRequestAuth(req)) {
+    const blocked = guestAccessError(table);
+    if (blocked) {
+      res.status(403).json({ error: blocked });
+      return;
+    }
+  } else if (!table) {
+    res.status(400).json({ error: "ບໍ່ພົບໂຕະນີ້." });
+    return;
+  }
+
   if (!(reason in CALL_REASON_LABELS)) {
     res.status(400).json({ error: "ກະລຸນາເລືອກເຫດຜົນ." });
     return;

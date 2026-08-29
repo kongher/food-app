@@ -5,10 +5,12 @@ import type {
   Order,
   Product,
   ProductInput,
+  PublicTableStatus,
   Shop,
   StaffAccount,
   StaffCall,
   StaffCallReason,
+  TableAction,
 } from "./types";
 import { getAuthToken } from "./lib/session";
 
@@ -104,11 +106,17 @@ export const api = {
   updateShop: (body: { name: string; logo: string }) =>
     request<Shop>("/api/shop", { method: "PUT", body: JSON.stringify(body) }),
   getTables: () => request<DiningTable[]>("/api/tables"),
+  getTableStatus: (tableNumber: number) => request<PublicTableStatus>(`/api/tables/status/${tableNumber}`),
   createTable: (body: { number: number }) =>
     request<DiningTable>("/api/tables", { method: "POST", body: JSON.stringify(body) }),
   deleteTable: (id: string) => request<void>(`/api/tables/${id}`, { method: "DELETE" }),
-  clearTable: (id: string) =>
-    request<DiningTable>(`/api/tables/${id}`, { method: "PATCH", body: JSON.stringify({ occupied: false }) }),
+  setTableAction: (id: string, action: TableAction) =>
+    request<DiningTable>(`/api/tables/${id}`, { method: "PATCH", body: JSON.stringify({ action }) }),
+  transferTable: (id: string, toNumber: number) =>
+    request<{ from: DiningTable; to: DiningTable }>(`/api/tables/${id}/transfer`, {
+      method: "POST",
+      body: JSON.stringify({ toNumber }),
+    }),
   getStaff: () => request<StaffAccount[]>("/api/staff"),
   createStaff: (body: { name: string; username: string; password: string }) =>
     request<StaffAccount>("/api/staff", { method: "POST", body: JSON.stringify(body) }),

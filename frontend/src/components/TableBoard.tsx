@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import { formatClock, formatElapsed } from "../lib/format";
 import { menuUrlForTable } from "../lib/tableSession";
-import type { DiningTable } from "../types";
+import type { DiningTable, TableAction } from "../types";
 
 interface BoardProps {
   tables: DiningTable[];
@@ -10,13 +10,31 @@ interface BoardProps {
   adding?: boolean;
   onAdd?: (number: number) => Promise<void>;
   onDelete?: (table: DiningTable) => Promise<void>;
-  onClear?: (table: DiningTable) => Promise<void>;
+  onAction?: (table: DiningTable, action: TableAction) => Promise<void>;
+  onTransfer?: (table: DiningTable, toNumber: number) => Promise<void>;
 }
 
-export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDelete, onClear }: BoardProps) {
+function tableTone(table: DiningTable): "call" | "busy" | "locked" | "empty" {
+  if (table.hasCall) return "call";
+  if (table.occupied) return "busy";
+  if (table.locked) return "locked";
+  return "empty";
+}
+
+function tableLabel(table: DiningTable): string {
+  const tone = tableTone(table);
+  if (tone === "call") return "ເອີ້ນ";
+  if (tone === "busy") return "ມີລູກຄ້າ";
+  if (tone === "locked") return "ຖືກລັອກ";
+  return "ຫວ່າງ";
+}
+
+export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDelete, onAction, onTransfer }: BoardProps) {
   const [draft, setDraft] = useState("");
   const [selected, setSelected] = useState<DiningTable | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [actingId, setActingId] = useState("");
+  const [boardError, setBoardError] = useState("");
   const nextNumber = (tables.reduce((max, table) => Math.max(max, table.number), 0) || 0) + 1;
 
   useEffect(() => {
@@ -34,7 +52,10 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
     if (
       next.hasOrder !== selected.hasOrder ||
       next.hasCall !== selected.hasCall ||
-      next.occupiedAt !== selected.occupiedAt
+      next.occupied !== selected.occupied ||
+      next.locked !== selected.locked ||
+      next.occupiedAt !== selected.occupiedAt ||
+      next.status !== selected.status
     ) {
       setSelected(next);
     }
@@ -45,6 +66,19 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
     const number = Number(draft || nextNumber);
     await onAdd?.(number);
     setDraft("");
+  }
+
+  async function quickLock(table: DiningTable, action: "lock" | "unlock") {
+    if (!onAction) return;
+    setActingId(table.id);
+    setBoardError("");
+    try {
+      await onAction(table, action);
+    } catch (err) {
+      setBoardError(err instanceof Error ? err.message : "ອັບເດດໂຕະບໍ່ສຳເລັດ.");
+    } finally {
+      setActingId("");
+    }
   }
 
   return (
@@ -81,50 +115,80 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
         <span className="inline-flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> ເອີ້ນພະນັກງານ
         </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-full bg-stone-400" /> ຖືກລັອກ
+        </span>
       </div>
+      {boardError && <p className="mb-3 rounded-2xl bg-red-50 px-3 py-2 text-sm text-red-700">{boardError}</p>}
       {tables.length === 0 ? (
         <p className="rounded-3xl bg-white p-8 text-center text-stone-500">ຍັງບໍ່ມີໂຕະ.</p>
       ) : (
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
-          {tables.map((table) => (
-            <button
-              key={table.id}
-              type="button"
-              onClick={() => setSelected(table)}
-              className={`aspect-square rounded-3xl p-3 text-left shadow-sm transition ${
-                table.hasCall
-                  ? "bg-red-50 ring-2 ring-red-400"
-                  : table.hasOrder
-                    ? "bg-orange-50 ring-2 ring-orange-400"
-                    : "bg-white ring-1 ring-stone-200"
-              }`}
-            >
-              <p className="font-display text-xl text-stone-900 sm:text-2xl">ໂຕະ {table.number}</p>
-              {table.hasOrder && table.occupiedAt ? (
-                <p className="mt-1 text-[11px] font-medium leading-tight text-orange-800 sm:text-xs">
-                  ເຂົ້າ {formatClock(table.occupiedAt)}
-                  <span className="mt-0.5 block text-[10px] font-normal text-orange-700/80 sm:text-[11px]">
-                    {formatElapsed(table.occupiedAt, now)}
-                  </span>
-                </p>
-              ) : null}
-              <p
-                className={`mt-1 text-xs font-semibold sm:text-sm ${
-                  table.hasCall ? "text-red-700" : table.hasOrder ? "text-orange-700" : "text-emerald-700"
+          {tables.map((table) => {
+            const tone = tableTone(table);
+            const locking = actingId === table.id;
+            return (
+              <div
+                key={table.id}
+                className={`flex aspect-square flex-col rounded-3xl p-3 shadow-sm ${
+                  tone === "call"
+                    ? "bg-red-50 ring-2 ring-red-400"
+                    : tone === "busy"
+                      ? "bg-orange-50 ring-2 ring-orange-400"
+                      : tone === "locked"
+                        ? "bg-stone-200 ring-2 ring-stone-400"
+                        : "bg-white ring-1 ring-stone-200"
                 }`}
               >
-                {table.hasCall ? "ເອີ້ນ" : table.hasOrder ? "ມີລູກຄ້າ" : "ຫວ່າງ"}
-              </p>
-            </button>
-          ))}
+                <button type="button" onClick={() => setSelected(table)} className="min-h-0 flex-1 text-left">
+                  <p className="font-display text-xl text-stone-900 sm:text-2xl">ໂຕະ {table.number}</p>
+                  {table.occupied && table.occupiedAt ? (
+                    <p className="mt-1 text-[11px] font-medium leading-tight text-orange-800 sm:text-xs">
+                      ເຂົ້າ {formatClock(table.occupiedAt)}
+                      <span className="mt-0.5 block text-[10px] font-normal text-orange-700/80 sm:text-[11px]">
+                        {formatElapsed(table.occupiedAt, now)}
+                      </span>
+                    </p>
+                  ) : null}
+                  <p
+                    className={`mt-1 text-xs font-semibold sm:text-sm ${
+                      tone === "call"
+                        ? "text-red-700"
+                        : tone === "busy"
+                          ? "text-orange-700"
+                          : tone === "locked"
+                            ? "text-stone-600"
+                            : "text-emerald-700"
+                    }`}
+                  >
+                    {tableLabel(table)}
+                  </p>
+                </button>
+                {onAction && !table.occupied && (
+                  <button
+                    type="button"
+                    disabled={locking}
+                    onClick={() => void quickLock(table, table.locked ? "unlock" : "lock")}
+                    className={`mt-2 w-full rounded-xl py-1.5 text-[11px] font-semibold text-white sm:text-xs ${
+                      table.locked ? "bg-emerald-700" : "bg-[#f4a261]"
+                    } disabled:opacity-50`}
+                  >
+                    {locking ? "..." : table.locked ? "ປົດລັອກ" : "ລັອກໂຕະ"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       {selected && (
         <TableQrModal
           table={selected}
+          tables={tables}
           now={now}
           onClose={() => setSelected(null)}
-          onClear={onClear ? () => onClear(selected) : undefined}
+          onAction={onAction ? (action) => onAction(selected, action) : undefined}
+          onTransfer={onTransfer ? (toNumber) => onTransfer(selected, toNumber) : undefined}
           onDelete={onDelete ? () => onDelete(selected) : undefined}
         />
       )}
@@ -134,15 +198,19 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
 
 function TableQrModal({
   table,
+  tables,
   now,
   onClose,
-  onClear,
+  onAction,
+  onTransfer,
   onDelete,
 }: {
   table: DiningTable;
+  tables: DiningTable[];
   now: number;
   onClose: () => void;
-  onClear?: () => Promise<void>;
+  onAction?: (action: TableAction) => Promise<void>;
+  onTransfer?: (toNumber: number) => Promise<void>;
   onDelete?: () => Promise<void>;
 }) {
   const url = menuUrlForTable(table.number);
@@ -150,10 +218,21 @@ function TableQrModal({
   const [enlarged, setEnlarged] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [clearing, setClearing] = useState(false);
+  const [acting, setActing] = useState<TableAction | "">("");
+  const [transferring, setTransferring] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [toNumber, setToNumber] = useState("");
   const [deleteError, setDeleteError] = useState("");
-  const [clearError, setClearError] = useState("");
-  const busy = clearing || deleting;
+  const [actionError, setActionError] = useState("");
+  const busy = Boolean(acting) || deleting || transferring;
+  const tone = tableTone(table);
+  const emptyTargets = tables.filter((item) => item.id !== table.id && !item.occupied && !item.locked);
+
+  useEffect(() => {
+    setShowTransfer(false);
+    setToNumber("");
+    setActionError("");
+  }, [table.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -173,17 +252,36 @@ function TableQrModal({
     link.click();
   }
 
-  async function markEmpty() {
-    if (!onClear) return;
-    setClearing(true);
-    setClearError("");
+  async function run(action: TableAction) {
+    if (!onAction) return;
+    setActing(action);
+    setActionError("");
     try {
-      await onClear();
+      await onAction(action);
       onClose();
     } catch (err) {
-      setClearError(err instanceof Error ? err.message : "ອັບເດດໂຕະບໍ່ສຳເລັດ.");
+      setActionError(err instanceof Error ? err.message : "ອັບເດດໂຕະບໍ່ສຳເລັດ.");
     } finally {
-      setClearing(false);
+      setActing("");
+    }
+  }
+
+  async function confirmTransfer() {
+    if (!onTransfer) return;
+    const destination = Number(toNumber);
+    if (!Number.isInteger(destination) || destination <= 0) {
+      setActionError("ກະລຸນາເລືອກໂຕະປາຍທາງ.");
+      return;
+    }
+    setTransferring(true);
+    setActionError("");
+    try {
+      await onTransfer(destination);
+      onClose();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "ຍ້າຍໂຕະບໍ່ສຳເລັດ.");
+    } finally {
+      setTransferring(false);
     }
   }
 
@@ -221,11 +319,28 @@ function TableQrModal({
           ×
         </button>
         <p className="pr-10 font-display text-2xl text-stone-900">ໂຕະ {table.number}</p>
-        {table.hasOrder && table.occupiedAt ? (
+        <p
+          className={`mt-1 text-sm font-semibold ${
+            tone === "call"
+              ? "text-red-700"
+              : tone === "busy"
+                ? "text-orange-800"
+                : tone === "locked"
+                  ? "text-stone-600"
+                  : "text-emerald-700"
+          }`}
+        >
+          {tableLabel(table)}
+        </p>
+        {table.occupied && table.occupiedAt ? (
           <p className="mt-1 text-sm font-medium text-orange-800">
             ເຂົ້າໂຕະ {formatClock(table.occupiedAt)} · {formatElapsed(table.occupiedAt, now)}
           </p>
-        ) : null}
+        ) : table.locked ? (
+          <p className="mt-1 text-sm text-stone-500">ລູກຄ້າສະແກນ QR ແລ້ວຈະເຫັນວ່າໂຕະຖືກລັອກ.</p>
+        ) : (
+          <p className="mt-1 text-sm text-stone-500">ລູກຄ້າສະແກນໄດ້ແຕ່ເບິ່ງເມນູ. ກົດເປີດໂຕະເພື່ອໃຫ້ສັ່ງອາຫານ.</p>
+        )}
         <p className="mt-1 break-all text-xs text-stone-500">{url}</p>
         {/https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(url) && (
           <p className="mt-2 rounded-2xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -247,33 +362,110 @@ function TableQrModal({
             ຂະຫຍາຍໃຫ້ສະແກນ
           </button>
         </div>
-        {clearError && <p className="mt-2 rounded-2xl bg-red-50 px-3 py-2 text-sm text-red-700">{clearError}</p>}
-        {(onClear || onDelete) && (
-          <div className={`mt-2 grid gap-2 ${onClear && onDelete ? "grid-cols-2" : "grid-cols-1"}`}>
-            {onClear && (
-              <button
-                type="button"
-                disabled={busy || !table.hasOrder}
-                onClick={() => void markEmpty()}
-                className="rounded-2xl bg-emerald-600 py-3 text-sm font-semibold text-white disabled:opacity-40"
-              >
-                {clearing ? "ກຳລັງບັນທຶກ..." : "ຫວ່າງໂຕະ"}
-              </button>
-            )}
-            {onDelete && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setDeleteError("");
-                  setConfirmDelete(true);
-                }}
-                className="rounded-2xl bg-red-600 py-3 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                ລຶບໂຕະ
-              </button>
+        {actionError && <p className="mt-2 rounded-2xl bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
+        {onAction && (
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            {table.occupied ? (
+              <>
+                {onTransfer && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setActionError("");
+                        setShowTransfer((open) => !open);
+                      }}
+                      className="col-span-2 rounded-2xl bg-sky-600 py-3 text-sm font-semibold text-white disabled:opacity-40"
+                    >
+                      ຍ້າຍໂຕະ
+                    </button>
+                    {showTransfer && (
+                      <div className="col-span-2 rounded-2xl bg-sky-50 p-3">
+                        <label className="block text-sm font-medium text-stone-700">
+                          ຍ້າຍອໍເດີໄປໂຕະ
+                          <select
+                            value={toNumber}
+                            onChange={(event) => setToNumber(event.target.value)}
+                            className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-orange-500"
+                          >
+                            <option value="">ເລືອກໂຕະຫວ່າງ</option>
+                            {emptyTargets.map((item) => (
+                              <option key={item.id} value={item.number}>
+                                ໂຕະ {item.number}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {emptyTargets.length === 0 && (
+                          <p className="mt-2 text-xs text-stone-500">ບໍ່ມີໂຕະຫວ່າງໃຫ້ຍ້າຍ.</p>
+                        )}
+                        <button
+                          type="button"
+                          disabled={busy || !toNumber}
+                          onClick={() => void confirmTransfer()}
+                          className="mt-2 w-full rounded-xl bg-sky-700 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+                        >
+                          {transferring ? "ກຳລັງຍ້າຍ..." : "ຢືນຢັນຍ້າຍ"}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run("close")}
+                  className="col-span-2 rounded-2xl bg-emerald-600 py-3 text-sm font-semibold text-white disabled:opacity-40"
+                >
+                  {acting === "close" ? "ກຳລັງປິດ..." : "ປິດໂຕະ"}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run("open")}
+                  className="rounded-2xl bg-orange-600 py-3 text-sm font-semibold text-white disabled:opacity-40"
+                >
+                  {acting === "open" ? "ກຳລັງເປີດ..." : "ເປີດໂຕະ"}
+                </button>
+                {table.locked ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void run("unlock")}
+                    className="rounded-2xl bg-stone-700 py-3 text-sm font-semibold text-white disabled:opacity-40"
+                  >
+                    {acting === "unlock" ? "ກຳລັງປົດ..." : "ປົດລັອກ"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void run("lock")}
+                    className="rounded-2xl bg-[#f4a261] py-3 text-sm font-semibold text-white disabled:opacity-40"
+                  >
+                    {acting === "lock" ? "ກຳລັງລັອກ..." : "ລັອກໂຕະ"}
+                  </button>
+                )}
+              </>
             )}
           </div>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setDeleteError("");
+              setConfirmDelete(true);
+            }}
+            className="mt-2 w-full rounded-2xl bg-red-600 py-3 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            ລຶບໂຕະ
+          </button>
         )}
       </div>
       {confirmDelete && (

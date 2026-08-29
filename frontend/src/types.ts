@@ -37,6 +37,7 @@ export interface OrderItem {
 
 export interface Order {
   id: string;
+  code: string;
   tableNumber: number;
   items: OrderItem[];
   total: number;
@@ -65,17 +66,27 @@ export interface ProductInput {
 
 export type StaffCallReason = "payment" | "refill" | "other";
 export type StaffCallStatus = "pending" | "done";
-export type TableOccupancy = "empty" | "busy";
+export type TableOccupancy = "empty" | "busy" | "locked";
+export type TableAction = "open" | "close" | "lock" | "unlock";
+export type GuestTableStatus = "locked" | "empty" | "occupied";
 
 export interface DiningTable {
   id: string;
   number: number;
   status: TableOccupancy;
   occupied: boolean;
+  locked: boolean;
   occupiedAt: string | null;
   hasOrder: boolean;
   hasCall: boolean;
   createdAt: string;
+}
+
+export interface PublicTableStatus {
+  number: number;
+  status: GuestTableStatus;
+  canOrder: boolean;
+  canCall: boolean;
 }
 
 export interface StaffAccount {

@@ -9,7 +9,7 @@ import { connectDeskSocket } from "../lib/deskSocket";
 import { formatTime } from "../lib/format";
 import { getSession, logoutSession } from "../lib/session";
 import { staffCallLabel, staffCallTimes, staffCallWhen } from "../lib/staffCall";
-import type { Category, DiningTable, Product, StaffCall } from "../types";
+import type { Category, DiningTable, Product, StaffCall, TableAction } from "../types";
 import { CustomerMenu } from "./CustomerPage";
 
 type StaffTab = "calls" | "tables" | "menu";
@@ -88,6 +88,10 @@ function StaffDashboard() {
       void api.getTables().then(setTables).catch(() => undefined);
     });
 
+    socket.on("tables", () => {
+      void api.getTables().then(setTables).catch(() => undefined);
+    });
+
     const poll = window.setInterval(() => {
       void loadCalls({ detectNew: true });
     }, 8000);
@@ -121,11 +125,26 @@ function StaffDashboard() {
     }
   }
 
-  async function clearTable(table: DiningTable) {
+  async function setTableStatus(table: DiningTable, action: TableAction) {
     setError("");
-    await api.clearTable(table.id);
+    await api.setTableAction(table.id, action);
     setTables(await api.getTables());
-    setMessage(`ໂຕະ ${table.number} ຫວ່າງແລ້ວ.`);
+    const messages: Record<TableAction, string> = {
+      open: `ເປີດໂຕະ ${table.number} ແລ້ວ.`,
+      close: `ປິດໂຕະ ${table.number} ແລ້ວ.`,
+      lock: `ລັອກໂຕະ ${table.number} ແລ້ວ.`,
+      unlock: `ປົດລັອກໂຕະ ${table.number} ແລ້ວ.`,
+    };
+    setMessage(messages[action]);
+  }
+
+  async function transferTable(table: DiningTable, toNumber: number) {
+    setError("");
+    await api.transferTable(table.id, toNumber);
+    const [nextTables, nextCalls] = await Promise.all([api.getTables(), api.getCalls()]);
+    setTables(nextTables);
+    setCalls(nextCalls);
+    setMessage(`ຍ້າຍອໍເດີຈາກໂຕະ ${table.number} ໄປໂຕະ ${toNumber} ແລ້ວ.`);
   }
 
   return (
@@ -245,7 +264,7 @@ function StaffDashboard() {
       {tab === "tables" && (
         <main className="px-4 pt-4 pb-8">
           {error && <p className="mb-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-          <TableBoard tables={tables} onClear={clearTable} />
+          <TableBoard tables={tables} onAction={setTableStatus} onTransfer={transferTable} />
         </main>
       )}
 

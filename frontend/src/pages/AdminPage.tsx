@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { Link, useNavigate } from "react-router-dom";
 import { api, apiUrl } from "../api";
 import { DateInput } from "../components/DateInput";
+import { OrderCard } from "../components/OrderCard";
 import { ShopBrand } from "../components/ShopBrand";
 import { StaffAccountsBoard } from "../components/StaffAccountsBoard";
 import { TableBoard } from "../components/TableBoard";
@@ -36,7 +37,8 @@ import {
   toDateInputValue,
   toDisplayDate,
 } from "../lib/format";
-import type { Category, DiningTable, Order, Product, ProductInput, StaffCall } from "../types";
+import { matchesOrderSearch } from "../lib/orderCode";
+import type { Category, DiningTable, Order, Product, ProductInput, StaffCall, TableAction } from "../types";
 
 type Tab = "orders" | "calls" | "tables" | "reports" | "menu" | "staff" | "settings";
 type ReportPreset = "today" | "yesterday" | "last7" | "month" | "custom";
@@ -80,6 +82,7 @@ export function AdminPage() {
   const [appliedFrom, setAppliedFrom] = useState(() => toDateInputValue(new Date()));
   const [appliedTo, setAppliedTo] = useState(() => toDateInputValue(new Date()));
   const [filterError, setFilterError] = useState("");
+  const [historyQuery, setHistoryQuery] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(() => isOrderSoundEnabled());
   const [soundSettingsOpen, setSoundSettingsOpen] = useState(false);
   const [voiceRateDraft, setVoiceRateDraft] = useState(() => getVoiceRate());
@@ -153,11 +156,24 @@ export function AdminPage() {
     setMessage(`ລຶບໂຕະ ${table.number} ແລ້ວ.`);
   }
 
-  async function clearTable(table: DiningTable) {
+  async function setTableStatus(table: DiningTable, action: TableAction) {
     setError("");
-    await api.clearTable(table.id);
+    await api.setTableAction(table.id, action);
     await loadTables();
-    setMessage(`ໂຕະ ${table.number} ຫວ່າງແລ້ວ.`);
+    const messages: Record<TableAction, string> = {
+      open: `ເປີດໂຕະ ${table.number} ແລ້ວ.`,
+      close: `ປິດໂຕະ ${table.number} ແລ້ວ.`,
+      lock: `ລັອກໂຕະ ${table.number} ແລ້ວ.`,
+      unlock: `ປົດລັອກໂຕະ ${table.number} ແລ້ວ.`,
+    };
+    setMessage(messages[action]);
+  }
+
+  async function transferTable(table: DiningTable, toNumber: number) {
+    setError("");
+    await api.transferTable(table.id, toNumber);
+    await Promise.all([loadTables(), loadOrders(), loadCalls()]);
+    setMessage(`ຍ້າຍອໍເດີຈາກໂຕະ ${table.number} ໄປໂຕະ ${toNumber} ແລ້ວ.`);
   }
 
   async function refreshAll() {
@@ -200,6 +216,9 @@ export function AdminPage() {
         /* ignore malformed payloads */
       }
       void loadCalls();
+      void loadTables();
+    });
+    source.addEventListener("tables", () => {
       void loadTables();
     });
     const poll = window.setInterval(() => {
@@ -494,6 +513,13 @@ export function AdminPage() {
     [filteredOrders],
   );
 
+  const listedOrders = useMemo(() => {
+    if (historyQuery.trim()) {
+      return completedOrders.filter((order) => matchesOrderSearch(order, historyQuery));
+    }
+    return filteredOrders;
+  }, [completedOrders, filteredOrders, historyQuery]);
+
   const reportLabel =
     reportPreset === "today"
       ? "ມື້ນີ້"
@@ -675,47 +701,7 @@ export function AdminPage() {
             {orders.length === 0 && <p className="rounded-3xl bg-white p-8 text-center text-stone-500">ຍັງບໍ່ມີອໍເດີ.</p>}
             <div className="space-y-4">
               {orders.map((order) => (
-                <article
-                  key={order.id}
-                  className={`rounded-3xl bg-white p-5 shadow-sm ${order.status === "pending" ? "ring-2 ring-orange-300" : "opacity-80"}`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-display text-2xl text-stone-900">ໂຕະ {order.tableNumber}</p>
-                      <p className="text-sm text-stone-500">{formatTime(order.createdAt)}</p>
-                    </div>
-                    <span
-                      className={`rounded-full px-3 py-1 text-sm font-semibold ${
-                        order.status === "pending" ? "bg-orange-100 text-orange-800" : "bg-emerald-100 text-emerald-800"
-                      }`}
-                    >
-                      {order.status === "pending" ? "ລໍຖ້າ" : "ສຳເລັດ"}
-                    </span>
-                  </div>
-                  <ul className="mt-4 space-y-2">
-                    {order.items.map((item, index) => (
-                      <li key={`${order.id}-${index}`} className="flex justify-between text-sm">
-                        <span>
-                          {item.quantity}× {item.name}
-                          {item.note ? <em className="ml-2 text-orange-700">({item.note})</em> : null}
-                        </span>
-                        <span>{formatVnd(item.price * item.quantity)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-4 flex items-center justify-between border-t border-stone-100 pt-4">
-                    <p className="font-semibold">ລວມ: {formatVnd(order.total)}</p>
-                    {order.status === "pending" && (
-                      <button
-                        type="button"
-                        onClick={() => void completeOrder(order.id)}
-                        className="rounded-2xl bg-emerald-600 px-4 py-2 font-semibold text-white"
-                      >
-                        ສຳເລັດ
-                      </button>
-                    )}
-                  </div>
-                </article>
+                <OrderCard key={order.id} order={order} shop={shop} onComplete={(id) => void completeOrder(id)} />
               ))}
             </div>
           </section>
@@ -777,7 +763,7 @@ export function AdminPage() {
         )}
 
         {tab === "tables" && (
-          <TableBoard canAdd tables={tables} adding={addingTable} onAdd={addTable} onClear={clearTable} onDelete={removeTable} />
+          <TableBoard canAdd tables={tables} adding={addingTable} onAdd={addTable} onAction={setTableStatus} onTransfer={transferTable} onDelete={removeTable} />
         )}
 
         {tab === "reports" && (
@@ -835,34 +821,35 @@ export function AdminPage() {
             </article>
 
             <h3 className="font-display mb-3 text-lg text-stone-900">ປະຫວັດອໍເດີສຳເລັດ</h3>
-            {filteredOrders.length === 0 && (
-              <p className="rounded-3xl bg-white p-8 text-center text-stone-500">ບໍ່ມີອໍເດີສຳເລັດໃນຊ່ວງນີ້.</p>
+            <label className="relative mb-4 block">
+              <span className="sr-only">ຄົ້ນຫາອໍເດີ</span>
+              <svg
+                className="pointer-events-none absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2 text-stone-400"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <path d="M20 20l-3-3" />
+              </svg>
+              <input
+                type="search"
+                value={historyQuery}
+                onChange={(event) => setHistoryQuery(event.target.value)}
+                placeholder="ຄົ້ນຫາລະຫັດອໍເດີ, ເລກໂຕະ, ວັນທີ..."
+                className="w-full rounded-2xl border border-stone-200 bg-white py-3 pr-4 pl-10 text-sm outline-none focus:border-orange-500"
+              />
+            </label>
+            {listedOrders.length === 0 && (
+              <p className="rounded-3xl bg-white p-8 text-center text-stone-500">
+                {historyQuery.trim() ? "ບໍ່ພົບອໍເດີທີ່ຄົ້ນຫາ." : "ບໍ່ມີອໍເດີສຳເລັດໃນຊ່ວງນີ້."}
+              </p>
             )}
             <div className="space-y-4">
-              {filteredOrders.map((order) => (
-                <article key={order.id} className="rounded-3xl bg-white p-5 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-display text-2xl text-stone-900">ໂຕະ {order.tableNumber}</p>
-                      <p className="text-sm text-stone-500">{formatTime(order.createdAt)}</p>
-                    </div>
-                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-semibold text-emerald-800">
-                      ສຳເລັດ
-                    </span>
-                  </div>
-                  <ul className="mt-4 space-y-2">
-                    {order.items.map((item, index) => (
-                      <li key={`${order.id}-${index}`} className="flex justify-between text-sm">
-                        <span>
-                          {item.quantity}× {item.name}
-                          {item.note ? <em className="ml-2 text-orange-700">({item.note})</em> : null}
-                        </span>
-                        <span>{formatVnd(item.price * item.quantity)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-4 border-t border-stone-100 pt-4 font-semibold">ລວມ: {formatVnd(order.total)}</p>
-                </article>
+              {listedOrders.map((order) => (
+                <OrderCard key={order.id} order={order} shop={shop} />
               ))}
             </div>
           </section>

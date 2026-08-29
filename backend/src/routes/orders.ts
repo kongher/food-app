@@ -1,11 +1,12 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { randomUUID } from "node:crypto";
-import { addSseClient, broadcastOrders, removeSseClient } from "../events.js";
-import { requireAdmin } from "../lib/auth.js";
+import { addSseClient, broadcastOrders, broadcastTables, removeSseClient } from "../events.js";
+import { getRequestAuth, requireAdmin } from "../lib/auth.js";
 import { toPublic, toPublicList } from "../lib/serialize.js";
-import { OrderModel, ProductModel } from "../models/index.js";
-import { markTableOccupied } from "../models/table.js";
+import { OrderModel, ProductModel, TableModel } from "../models/index.js";
+import { uniqueOrderCode, withOrderCode } from "../models/order.js";
+import { guestAccessError, openTableSession } from "../models/table.js";
 import type { Order, OrderItem, OrderStatus, Product } from "../types.js";
 
 const orderLimiter = rateLimit({
@@ -39,7 +40,7 @@ ordersRouter.get("/orders/stream", requireAdmin, (req, res) => {
 
 ordersRouter.get("/orders", requireAdmin, async (_req, res) => {
   const orders = await OrderModel.find().sort({ createdAt: -1 }).lean();
-  res.json(toPublicList<Order>(orders));
+  res.json(toPublicList<Order>(orders).map(withOrderCode));
 });
 
 ordersRouter.post("/orders", orderLimiter, async (req, res) => {
@@ -48,6 +49,19 @@ ordersRouter.post("/orders", orderLimiter, async (req, res) => {
 
   if (!Number.isInteger(tableNumber) || tableNumber <= 0) {
     res.status(400).json({ error: "ເລກໂຕະບໍ່ຖືກຕ້ອງ." });
+    return;
+  }
+
+  const table = await TableModel.findOne({ number: tableNumber }).lean();
+  const staff = getRequestAuth(req);
+  if (!staff) {
+    const blocked = guestAccessError(table);
+    if (blocked) {
+      res.status(403).json({ error: blocked });
+      return;
+    }
+  } else if (!table) {
+    res.status(400).json({ error: "ບໍ່ພົບໂຕະນີ້." });
     return;
   }
 
@@ -97,19 +111,24 @@ ordersRouter.post("/orders", orderLimiter, async (req, res) => {
   }
 
   const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const createdAt = new Date().toISOString();
   const order: Order = {
     id: randomUUID(),
+    code: await uniqueOrderCode(new Date(createdAt)),
     tableNumber,
     items,
     total,
     status: "pending",
-    createdAt: new Date().toISOString(),
+    createdAt,
   };
 
   await OrderModel.create(order);
-  await markTableOccupied(order.tableNumber, order.createdAt);
+  if (staff) {
+    await openTableSession(order.tableNumber, order.createdAt);
+    broadcastTables({ type: "updated", tableNumber: order.tableNumber });
+  }
   broadcastOrders({ type: "created", orderId: order.id, tableNumber: order.tableNumber });
-  res.status(201).json(order);
+  res.status(201).json(withOrderCode(order));
 });
 
 ordersRouter.patch("/orders/:id", requireAdmin, async (req, res) => {
@@ -133,5 +152,5 @@ ordersRouter.patch("/orders/:id", requireAdmin, async (req, res) => {
   }
 
   broadcastOrders({ type: "updated", orderId: updated.id });
-  res.json(updated);
+  res.json(withOrderCode(updated));
 });
