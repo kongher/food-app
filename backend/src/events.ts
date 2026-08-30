@@ -4,6 +4,7 @@ import type { Response } from "express";
 type SseEvent =
   | { name: "orders"; data: { type: "created" | "updated"; orderId: string; tableNumber?: number } }
   | { name: "calls"; data: { type: "created" | "updated" | "repeated"; callId: string; tableNumber?: number } }
+  | { name: "songs"; data: { type: "created" | "updated" | "deleted"; songId: string; tableNumber?: number } }
   | { name: "tables"; data: { type: "updated"; tableNumber: number } };
 
 const clients = new Set<Response>();
@@ -38,6 +39,14 @@ export function broadcastCalls(data: {
   tableNumber?: number;
 }): void {
   emit({ name: "calls", data });
+}
+
+export function broadcastSongs(data: {
+  type: "created" | "updated" | "deleted";
+  songId: string;
+  tableNumber?: number;
+}): void {
+  emit({ name: "songs", data });
 }
 
 export function broadcastTables(data: { type: "updated"; tableNumber: number }): void {

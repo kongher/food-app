@@ -19,6 +19,7 @@ import { menuRouter } from "./routes/menu.js";
 import { ordersRouter } from "./routes/orders.js";
 import { productsRouter } from "./routes/products.js";
 import { shopRouter } from "./routes/shop.js";
+import { songsRouter } from "./routes/songs.js";
 import { staffRouter } from "./routes/staff.js";
 import { tablesRouter } from "./routes/tables.js";
 import { uploadsRouter } from "./routes/uploads.js";
@@ -60,6 +61,7 @@ app.use("/api", categoriesRouter);
 app.use("/api", productsRouter);
 app.use("/api", ordersRouter);
 app.use("/api", callsRouter);
+app.use("/api", songsRouter);
 app.use("/api", uploadsRouter);
 
 function frontendDist(): string | null {

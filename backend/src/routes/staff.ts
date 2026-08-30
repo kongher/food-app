@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
-import { hashPassword, requireAdmin } from "../lib/auth.js";
+import { hashPassword, rememberTokenVersion, requireAdmin } from "../lib/auth.js";
 import type { UserAccount } from "../lib/authTypes.js";
+import { DEFAULT_PASSWORD } from "../lib/password.js";
 import { toPublic } from "../lib/serialize.js";
+import { disconnectUserSockets } from "../lib/socket.js";
 import { UserModel } from "../models/user.js";
 
 export const staffRouter = Router();
@@ -14,6 +16,7 @@ export type PublicStaff = {
   name: string;
   role: "staff";
   createdAt: string;
+  mustChangePassword: boolean;
 };
 
 const USERNAME_RE = /^[a-z0-9._-]{3,32}$/;
@@ -36,6 +39,7 @@ function toPublicStaff(doc: unknown): PublicStaff | null {
     name: (row.name || "").trim() || row.username,
     role: "staff",
     createdAt: row.createdAt,
+    mustChangePassword: Boolean(row.mustChangePassword),
   };
 }
 
@@ -83,21 +87,20 @@ staffRouter.post("/staff", async (req, res) => {
     res.status(400).json({ error: name.error });
     return;
   }
-  const password = parsePassword(body.password, true);
-  if ("error" in password || !password.password) {
-    res.status(400).json({ error: "error" in password ? password.error : "ກະລຸນາໃສ່ລະຫັດຜ່ານ." });
-    return;
-  }
 
   try {
+    const createdId = randomUUID();
     const created = await UserModel.create({
-      id: randomUUID(),
+      id: createdId,
       username: username.username,
       name: name.name,
-      passwordHash: await hashPassword(password.password),
+      passwordHash: await hashPassword(DEFAULT_PASSWORD),
       role: "staff",
+      tokenVersion: 0,
+      mustChangePassword: true,
       createdAt: new Date().toISOString(),
     });
+    rememberTokenVersion(createdId, 0);
     res.status(201).json(toPublicStaff(created.toObject()));
   } catch (err) {
     if (isDuplicateKey(err)) {
@@ -139,6 +142,8 @@ staffRouter.put("/staff/:id", async (req, res) => {
   };
   if (password.password) {
     update.passwordHash = await hashPassword(password.password);
+    update.tokenVersion = (existing.tokenVersion ?? 0) + 1;
+    update.mustChangePassword = password.password === DEFAULT_PASSWORD;
   }
 
   try {
@@ -148,6 +153,10 @@ staffRouter.put("/staff/:id", async (req, res) => {
     if (!updated) {
       res.status(404).json({ error: "ບໍ່ພົບບັນຊີພະນັກງານ." });
       return;
+    }
+    if (typeof update.tokenVersion === "number") {
+      rememberTokenVersion(id, update.tokenVersion);
+      disconnectUserSockets(id);
     }
     res.json(updated);
   } catch (err) {

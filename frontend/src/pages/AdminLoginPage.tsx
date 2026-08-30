@@ -26,7 +26,12 @@ export function AdminLoginPage() {
         setError("ບັນຊີນີ້ບໍ່ແມ່ນເຈົ້າຂອງຮ້ານ.");
         return;
       }
-      saveSession(session);
+      saveSession({
+        token: session.token,
+        role: session.role,
+        username: session.username,
+        mustChangePassword: Boolean(session.mustChangePassword),
+      });
       navigate("/admin", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ.");
@@ -67,7 +72,7 @@ export function AdminLoginPage() {
         >
           {submitting ? "ກຳລັງເຂົ້າ..." : "ເຂົ້າສູ່ລະບົບ"}
         </button>
-        <Link to="/staff/login" className="mt-4 block text-center text-sm text-stone-400 underline">
+        <Link to="/staff/login" className="mt-4 block text-center text-sm text-blue-600 underline">
           ພະນັກງານ · ເຂົ້າວຽກ
         </Link>
       </form>

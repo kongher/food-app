@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, apiUrl } from "../api";
+import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { DateInput } from "../components/DateInput";
 import { OrderCard } from "../components/OrderCard";
 import { ShopBrand } from "../components/ShopBrand";
+import { SongRequestsBoard } from "../components/SongRequestsBoard";
 import { StaffAccountsBoard } from "../components/StaffAccountsBoard";
 import { TableBoard } from "../components/TableBoard";
 import { useShop } from "../context/ShopContext";
 import { logoutAdmin } from "../lib/adminAuth";
-import { getAuthToken } from "../lib/session";
+import { getAuthToken, getSession, saveSession } from "../lib/session";
 import { staffCallLabel, staffCallTimes, staffCallWhen } from "../lib/staffCall";
 import { playStaffAlert, unlockAudio } from "../lib/alert";
 import {
@@ -38,9 +40,9 @@ import {
   toDisplayDate,
 } from "../lib/format";
 import { matchesOrderSearch } from "../lib/orderCode";
-import type { Category, DiningTable, Order, Product, ProductInput, StaffCall, TableAction } from "../types";
+import type { Category, DiningTable, Order, Product, ProductInput, SongRequest, StaffCall, TableAction } from "../types";
 
-type Tab = "orders" | "calls" | "tables" | "reports" | "menu" | "staff" | "settings";
+type Tab = "orders" | "calls" | "songs" | "tables" | "reports" | "menu" | "staff" | "settings";
 type ReportPreset = "today" | "yesterday" | "last7" | "month" | "custom";
 
 const emptyForm: ProductInput = {
@@ -55,9 +57,13 @@ const emptyForm: ProductInput = {
 export function AdminPage() {
   const navigate = useNavigate();
   const { shop, setShop } = useShop();
+  const [passwordGate, setPasswordGate] = useState<"checking" | "change" | "ok">(() =>
+    getSession()?.mustChangePassword ? "change" : "checking",
+  );
   const [tab, setTab] = useState<Tab>("orders");
   const [orders, setOrders] = useState<Order[]>([]);
   const [calls, setCalls] = useState<StaffCall[]>([]);
+  const [songs, setSongs] = useState<SongRequest[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +101,7 @@ export function AdminPage() {
   const [addingTable, setAddingTable] = useState(false);
   const knownOrderIds = useRef<Set<string> | null>(null);
   const knownCallTimes = useRef<Map<string, number> | null>(null);
+  const knownSongIds = useRef<Set<string> | null>(null);
 
   async function loadOrders(options?: { detectNew?: boolean }) {
     const data = await api.getOrders();
@@ -119,6 +126,16 @@ export function AdminPage() {
     }
     knownCallTimes.current = new Map(data.map((call) => [call.id, Math.max(1, Number(call.times) || 1)]));
     setCalls(data);
+  }
+
+  async function loadSongs(options?: { detectNew?: boolean }) {
+    const data = await api.getSongs();
+    if (options?.detectNew && knownSongIds.current) {
+      const newcomers = data.filter((song) => song.status === "pending" && !knownSongIds.current?.has(song.id));
+      if (newcomers.length > 0) playStaffAlert();
+    }
+    knownSongIds.current = new Set(data.map((song) => song.id));
+    setSongs(data);
   }
 
   async function loadMenu() {
@@ -172,14 +189,14 @@ export function AdminPage() {
   async function transferTable(table: DiningTable, toNumber: number) {
     setError("");
     await api.transferTable(table.id, toNumber);
-    await Promise.all([loadTables(), loadOrders(), loadCalls()]);
+    await Promise.all([loadTables(), loadOrders(), loadCalls(), loadSongs()]);
     setMessage(`ຍ້າຍອໍເດີຈາກໂຕະ ${table.number} ໄປໂຕະ ${toNumber} ແລ້ວ.`);
   }
 
   async function refreshAll() {
     setError("");
     try {
-      await Promise.all([loadOrders(), loadCalls(), loadMenu(), loadTables()]);
+      await Promise.all([loadOrders(), loadCalls(), loadSongs(), loadMenu(), loadTables()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ໂຫຼດຂໍ້ມູນບໍ່ສຳເລັດ.");
     } finally {
@@ -188,6 +205,31 @@ export function AdminPage() {
   }
 
   useEffect(() => {
+    let cancelled = false;
+    void api
+      .getMe()
+      .then((me) => {
+        if (cancelled) return;
+        const session = getSession();
+        if (session) saveSession({ ...session, mustChangePassword: me.mustChangePassword });
+        setPasswordGate(me.mustChangePassword ? "change" : "ok");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (!getSession()) {
+          logoutAdmin();
+          navigate("/admin/login", { replace: true });
+          return;
+        }
+        setPasswordGate(getSession()?.mustChangePassword ? "change" : "ok");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (passwordGate !== "ok") return;
     void refreshAll();
     const unlock = () => {
       unlockAudio();
@@ -218,12 +260,22 @@ export function AdminPage() {
       void loadCalls();
       void loadTables();
     });
+    source.addEventListener("songs", (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as { type?: string };
+        if (payload.type === "created") playStaffAlert();
+      } catch {
+        /* ignore malformed payloads */
+      }
+      void loadSongs();
+    });
     source.addEventListener("tables", () => {
       void loadTables();
     });
     const poll = window.setInterval(() => {
       void loadOrders({ detectNew: true });
       void loadCalls({ detectNew: true });
+      void loadSongs({ detectNew: true });
       void loadTables();
     }, 8000);
     return () => {
@@ -232,10 +284,11 @@ export function AdminPage() {
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
     };
-  }, []);
+  }, [passwordGate]);
 
   const pendingCount = orders.filter((order) => order.status === "pending").length;
   const pendingCalls = calls.filter((call) => call.status === "pending");
+  const pendingSongs = songs.filter((song) => song.status === "pending");
 
   async function completeOrder(id: string) {
     try {
@@ -247,6 +300,19 @@ export function AdminPage() {
     }
   }
 
+  function upsertOrder(updated: Order) {
+    setOrders((current) => {
+      if (current.some((order) => order.id === updated.id)) {
+        return current.map((order) => (order.id === updated.id ? updated : order));
+      }
+      return [updated, ...current];
+    });
+  }
+
+  function removeOrder(id: string) {
+    setOrders((current) => current.filter((order) => order.id !== id));
+  }
+
   async function resolveCall(id: string) {
     try {
       await api.resolveCall(id);
@@ -254,6 +320,26 @@ export function AdminPage() {
       setMessage("ຮັບຄຳຮ້ອງຂໍແລ້ວ.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "ອັບເດດຄຳຮ້ອງຂໍບໍ່ສຳເລັດ.");
+    }
+  }
+
+  async function approveSong(id: string) {
+    try {
+      await api.setSongStatus(id, "approved");
+      await loadSongs();
+      setMessage("ອະນຸມັດເພງແລ້ວ.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ອັບເດດຄຳຮ້ອງເພງບໍ່ສຳເລັດ.");
+    }
+  }
+
+  async function removeSong(id: string) {
+    try {
+      await api.deleteSong(id);
+      await loadSongs();
+      setMessage("ລຶບຄຳຮ້ອງເພງແລ້ວ.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ລຶບຄຳຮ້ອງເພງບໍ່ສຳເລັດ.");
     }
   }
 
@@ -581,6 +667,44 @@ export function AdminPage() {
     setReportPreset("custom");
   }
 
+  if (passwordGate === "checking") {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-stone-100 text-stone-500">ກຳລັງໂຫຼດ...</div>
+    );
+  }
+
+  if (passwordGate === "change") {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-[#fff7ed] px-5 py-8">
+        <div className="w-full max-w-md">
+          <div className="mb-4 flex items-center justify-between">
+            <ShopBrand
+              nameClassName="text-xs font-semibold text-orange-700"
+              logoClassName="h-10 w-10 rounded-full object-cover"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                logoutAdmin();
+                navigate("/admin/login", { replace: true });
+              }}
+              className="rounded-full border border-stone-200 bg-white px-3 py-1 text-sm text-stone-800"
+            >
+              ອອກຈາກລະບົບ
+            </button>
+          </div>
+          <ChangePasswordForm
+            forced
+            onSuccess={() => {
+              setPasswordGate("ok");
+              setMessage("ປ່ຽນລະຫັດຜ່ານແລ້ວ. ກະລຸນາໃຊ້ລະຫັດໃໝ່ຕໍ່ໄປ.");
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-dvh bg-stone-100">
       <header className="border-b border-orange-100 bg-[#fff7ed] text-stone-900">
@@ -615,6 +739,9 @@ export function AdminPage() {
             </TabButton>
             <TabButton active={tab === "calls"} onClick={() => setTab("calls")}>
               ເອີ້ນພະນັກງານ {pendingCalls.length > 0 && <span className="ml-2 rounded-full bg-orange-500 px-2 py-0.5 text-xs text-white">{pendingCalls.length}</span>}
+            </TabButton>
+            <TabButton active={tab === "songs"} onClick={() => setTab("songs")}>
+              ເພງ {pendingSongs.length > 0 && <span className="ml-2 rounded-full bg-orange-500 px-2 py-0.5 text-xs text-white">{pendingSongs.length}</span>}
             </TabButton>
             <TabButton active={tab === "tables"} onClick={() => setTab("tables")}>
               ໂຕະ
@@ -684,6 +811,16 @@ export function AdminPage() {
             {pendingCalls.length > 1 ? ` · +${pendingCalls.length - 1}` : ""}
           </button>
         )}
+        {pendingSongs.length > 0 && tab !== "songs" && (
+          <button
+            type="button"
+            onClick={() => setTab("songs")}
+            className="mb-4 w-full rounded-2xl bg-sky-600 px-4 py-3 text-left font-semibold text-white"
+          >
+            🎵 ໂຕະ {pendingSongs[0]?.tableNumber} ຂໍເພງ: {pendingSongs[0]?.title}
+            {pendingSongs.length > 1 ? ` · +${pendingSongs.length - 1}` : ""}
+          </button>
+        )}
         {loading && <p className="text-stone-500">ກຳລັງໂຫຼດ...</p>}
 
         {tab === "orders" && (
@@ -701,7 +838,16 @@ export function AdminPage() {
             {orders.length === 0 && <p className="rounded-3xl bg-white p-8 text-center text-stone-500">ຍັງບໍ່ມີອໍເດີ.</p>}
             <div className="space-y-4">
               {orders.map((order) => (
-                <OrderCard key={order.id} order={order} shop={shop} onComplete={(id) => void completeOrder(id)} />
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  shop={shop}
+                  products={products}
+                  categories={categories}
+                  editable
+                  onComplete={(id) => void completeOrder(id)}
+                  onUpdated={upsertOrder}
+                />
               ))}
             </div>
           </section>
@@ -762,8 +908,31 @@ export function AdminPage() {
           </section>
         )}
 
+        {tab === "songs" && (
+          <SongRequestsBoard
+            songs={songs}
+            onApprove={(id) => approveSong(id)}
+            onDelete={(id) => removeSong(id)}
+            onRefresh={() => void loadSongs()}
+          />
+        )}
+
         {tab === "tables" && (
-          <TableBoard canAdd tables={tables} adding={addingTable} onAdd={addTable} onAction={setTableStatus} onTransfer={transferTable} onDelete={removeTable} />
+          <TableBoard
+            canAdd
+            tables={tables}
+            adding={addingTable}
+            orders={orders}
+            products={products}
+            categories={categories}
+            shop={shop}
+            onAdd={addTable}
+            onAction={setTableStatus}
+            onTransfer={transferTable}
+            onDelete={removeTable}
+            onOrderUpdated={upsertOrder}
+            onOrderRemoved={removeOrder}
+          />
         )}
 
         {tab === "reports" && (
@@ -849,7 +1018,15 @@ export function AdminPage() {
             )}
             <div className="space-y-4">
               {listedOrders.map((order) => (
-                <OrderCard key={order.id} order={order} shop={shop} />
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  shop={shop}
+                  products={products}
+                  categories={categories}
+                  editable
+                  onUpdated={upsertOrder}
+                />
               ))}
             </div>
           </section>
@@ -1100,7 +1277,7 @@ export function AdminPage() {
         {tab === "staff" && <StaffAccountsBoard onMessage={setMessage} onError={setError} />}
 
         {tab === "settings" && (
-          <section className="mx-auto max-w-lg">
+          <section className="mx-auto grid max-w-lg gap-6">
             <form onSubmit={(event) => void saveShopSettings(event)} className="rounded-3xl bg-white p-5 shadow-sm">
               <h2 className="font-display text-xl text-stone-900">ຕັ້ງຄ່າຮ້ານ</h2>
               <p className="mt-1 text-sm text-stone-500">ຊື່ ແລະ ໂລໂກ້ຈະສະແດງໃນໜ້າລູກຄ້າ ແລະ ໜ້າຈັດການ.</p>
@@ -1164,6 +1341,9 @@ export function AdminPage() {
                 {savingShop ? "ກຳລັງບັນທຶກ..." : "ບັນທຶກ"}
               </button>
             </form>
+            <ChangePasswordForm
+              onSuccess={() => setMessage("ປ່ຽນລະຫັດຜ່ານແລ້ວ. ອຸປະກອນອື່ນຖືກອອກຈາກລະບົບ.")}
+            />
           </section>
         )}
         {editingId && (

@@ -1,7 +1,10 @@
 import QRCode from "qrcode";
 import { displayOrderCode } from "./orderCode";
 import { formatTime, formatVnd } from "./format";
-import type { Order } from "../types";
+import { tableBillCode } from "./tableBill";
+import type { Order, OrderItem } from "../types";
+
+const THERMAL_BILL_ID = "thermal-bill-root";
 
 function escapeHtml(value: string): string {
   return value
@@ -12,9 +15,61 @@ function escapeHtml(value: string): string {
 }
 
 export async function printOrderBill(order: Order, shop: { name: string; logo?: string }): Promise<void> {
-  const code = displayOrderCode(order);
+  await printBillHtml({
+    shop,
+    code: displayOrderCode(order),
+    tableNumber: order.tableNumber,
+    timeLabel: formatTime(order.createdAt),
+    codeLabel: "ລະຫັດອໍເດີ",
+    items: order.items,
+    total: order.total,
+  });
+}
+
+export async function printTableBill({
+  shop,
+  tableNumber,
+  items,
+  total,
+  startedAt,
+}: {
+  shop: { name: string; logo?: string };
+  tableNumber: number;
+  items: OrderItem[];
+  total: number;
+  startedAt: string;
+}): Promise<void> {
+  const code = tableBillCode(tableNumber, startedAt);
+  await printBillHtml({
+    shop,
+    code,
+    tableNumber,
+    timeLabel: formatTime(startedAt),
+    codeLabel: "ລະຫັດບິນ",
+    items,
+    total,
+  });
+}
+
+async function printBillHtml({
+  shop,
+  code,
+  tableNumber,
+  timeLabel,
+  codeLabel,
+  items,
+  total,
+}: {
+  shop: { name: string; logo?: string };
+  code: string;
+  tableNumber: number;
+  timeLabel: string;
+  codeLabel: string;
+  items: OrderItem[];
+  total: number;
+}): Promise<void> {
   const qr = await QRCode.toDataURL(code, { width: 240, margin: 1, errorCorrectionLevel: "M" });
-  const rows = order.items
+  const rows = items
     .map((item) => {
       const note = item.note ? `<div class="note">${escapeHtml(item.note)}</div>` : "";
       return `<tr>
@@ -28,107 +83,155 @@ export async function printOrderBill(order: Order, shop: { name: string; logo?: 
     ? `<img class="logo" src="${escapeHtml(shop.logo)}" alt="" />`
     : "";
 
-  const html = `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeHtml(code)}</title>
-  <style>
-    @page { size: 80mm auto; margin: 2mm; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      width: 72mm;
-      font-family: "Noto Sans Lao", "Noto Sans", ui-sans-serif, system-ui, sans-serif;
-      font-size: 12px;
-      color: #111;
-    }
-    .bill { width: 72mm; padding: 2mm; }
-    .center { text-align: center; }
-    .logo { width: 18mm; height: 18mm; object-fit: cover; border-radius: 50%; }
-    h1 { font-size: 16px; margin: 4px 0 2px; }
-    .muted { color: #444; font-size: 11px; }
-    hr { border: 0; border-top: 1px dashed #111; margin: 8px 0; }
-    table { width: 100%; border-collapse: collapse; }
-    td { vertical-align: top; padding: 2px 0; }
-    .right { text-align: right; white-space: nowrap; }
-    .note { font-size: 10px; color: #333; }
-    .total { font-size: 14px; font-weight: 700; }
-    .qr { width: 28mm; height: 28mm; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-  </style>
-</head>
-<body>
-  <div class="bill">
-    <div class="center">
-      ${logo}
-      <h1>${escapeHtml(shop.name)}</h1>
-      <div class="muted">ໃບບິນ / BILL</div>
+  const markup = `
+    <style>
+      #thermal-bill-root .bill {
+        width: 100%;
+        padding: 2mm;
+        font-family: "Noto Sans Lao", "Noto Sans", ui-sans-serif, system-ui, sans-serif;
+        font-size: 12px;
+        line-height: 1.4;
+        color: #111;
+        background: #fff;
+      }
+      #thermal-bill-root .center { text-align: center; }
+      #thermal-bill-root .logo {
+        width: 18mm;
+        height: 18mm;
+        object-fit: cover;
+        border-radius: 50%;
+      }
+      #thermal-bill-root h1 { font-size: 16px; margin: 4px 0 2px; }
+      #thermal-bill-root .muted { color: #444; font-size: 11px; }
+      #thermal-bill-root hr {
+        border: 0;
+        border-top: 1px dashed #111;
+        margin: 8px 0;
+      }
+      #thermal-bill-root table { width: 100%; border-collapse: collapse; }
+      #thermal-bill-root td { vertical-align: top; padding: 2px 0; }
+      #thermal-bill-root .right { text-align: right; white-space: nowrap; }
+      #thermal-bill-root .note { font-size: 10px; color: #333; }
+      #thermal-bill-root .total { font-size: 14px; font-weight: 700; }
+      #thermal-bill-root .qr { width: 28mm; height: 28mm; }
+      #thermal-bill-root.thermal-bill--58 .bill { font-size: 11px; }
+      #thermal-bill-root.thermal-bill--58 .logo { width: 14mm; height: 14mm; }
+      #thermal-bill-root.thermal-bill--58 .qr { width: 22mm; height: 22mm; }
+    </style>
+    <div class="bill">
+      <div class="center">
+        ${logo}
+        <h1>${escapeHtml(shop.name)}</h1>
+        <div class="muted">ໃບບິນ / BILL</div>
+      </div>
+      <hr />
+      <div><strong>${escapeHtml(codeLabel)}:</strong> ${escapeHtml(code)}</div>
+      <div><strong>ໂຕະ:</strong> ${tableNumber}</div>
+      <div><strong>ເວລາ:</strong> ${escapeHtml(timeLabel)}</div>
+      <hr />
+      <table>${rows}</table>
+      <hr />
+      <table>
+        <tr class="total">
+          <td>ລວມທັງໝົດ</td>
+          <td class="right">${escapeHtml(formatVnd(total))}</td>
+        </tr>
+      </table>
+      <hr />
+      <div class="center">
+        <img class="qr" src="${qr}" alt="${escapeHtml(code)}" />
+        <div class="muted">${escapeHtml(code)}</div>
+        <div class="muted">ຂອບໃຈທີ່ອຸດໜູນ</div>
+      </div>
     </div>
-    <hr />
-    <div><strong>ລະຫັດອໍເດີ:</strong> ${escapeHtml(code)}</div>
-    <div><strong>ໂຕະ:</strong> ${order.tableNumber}</div>
-    <div><strong>ເວລາ:</strong> ${escapeHtml(formatTime(order.createdAt))}</div>
-    <hr />
-    <table>${rows}</table>
-    <hr />
-    <table>
-      <tr class="total">
-        <td>ລວມທັງໝົດ</td>
-        <td class="right">${escapeHtml(formatVnd(order.total))}</td>
-      </tr>
-    </table>
-    <hr />
-    <div class="center">
-      <img class="qr" src="${qr}" alt="${escapeHtml(code)}" />
-      <div class="muted">${escapeHtml(code)}</div>
-      <div class="muted">ຂອບໃຈທີ່ອຸດໜູນ</div>
-    </div>
-  </div>
-</body>
-</html>`;
+  `;
 
-  await printHtmlDocument(html);
+  await printThermalBill(markup, `${shop.name} · ${code}`);
 }
 
-function printHtmlDocument(html: string): Promise<void> {
+function printThermalBill(markup: string, title: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const iframe = document.createElement("iframe");
-    iframe.setAttribute("aria-hidden", "true");
-    iframe.setAttribute("title", "print-bill");
-    Object.assign(iframe.style, {
-      position: "fixed",
-      right: "0",
-      bottom: "0",
-      width: "0",
-      height: "0",
-      border: "0",
-    });
+    document.getElementById(THERMAL_BILL_ID)?.remove();
+
+    const root = document.createElement("div");
+    root.id = THERMAL_BILL_ID;
+    root.className = "thermal-bill thermal-bill--80";
+    root.setAttribute("aria-hidden", "true");
+    root.innerHTML = markup;
+    document.body.appendChild(root);
+
+    const previousTitle = document.title;
+    document.title = title;
 
     const cleanup = () => {
-      iframe.remove();
+      document.title = previousTitle;
+      root.remove();
     };
 
-    iframe.onload = () => {
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-        resolve();
-      } catch (err) {
-        reject(err instanceof Error ? err : new Error("ພິມບິນບໍ່ສຳເລັດ."));
-      } finally {
-        window.setTimeout(cleanup, 800);
-      }
-    };
-
-    iframe.onerror = () => {
+    const finish = (error?: Error) => {
       cleanup();
-      reject(new Error("ບໍ່ສາມາດເປີດໜ້າພິມໄດ້."));
+      if (error) reject(error);
+      else resolve();
     };
 
-    document.body.appendChild(iframe);
-    iframe.srcdoc = html;
+    void waitForImages(root)
+      .then(() => waitForPrintDialog())
+      .then(() => finish())
+      .catch((err) => finish(err instanceof Error ? err : new Error("ພິມບິນບໍ່ສຳເລັດ.")));
+  });
+}
+
+function waitForImages(root: HTMLElement): Promise<void> {
+  const images = [...root.querySelectorAll("img")];
+  if (images.length === 0) return Promise.resolve();
+  return Promise.all(
+    images.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete) {
+            resolve();
+            return;
+          }
+          img.addEventListener("load", () => resolve(), { once: true });
+          img.addEventListener("error", () => resolve(), { once: true });
+        }),
+    ),
+  ).then(() => undefined);
+}
+
+function waitForPrintDialog(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const media = window.matchMedia("print");
+
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("afterprint", onAfterPrint);
+      media.removeEventListener("change", onMedia);
+      window.clearTimeout(safety);
+      resolve();
+    };
+
+    const onAfterPrint = () => settle();
+    const onMedia = (event: MediaQueryListEvent) => {
+      if (!event.matches) settle();
+    };
+
+    window.addEventListener("afterprint", onAfterPrint);
+    media.addEventListener("change", onMedia);
+
+    const safety = window.setTimeout(settle, 120_000);
+
+    window.requestAnimationFrame(() => {
+      try {
+        window.print();
+      } catch (err) {
+        window.removeEventListener("afterprint", onAfterPrint);
+        media.removeEventListener("change", onMedia);
+        window.clearTimeout(safety);
+        reject(err instanceof Error ? err : new Error("ພິມບິນບໍ່ສຳເລັດ."));
+      }
+    });
   });
 }

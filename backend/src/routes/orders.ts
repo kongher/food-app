@@ -2,7 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { randomUUID } from "node:crypto";
 import { addSseClient, broadcastOrders, broadcastTables, removeSseClient } from "../events.js";
-import { getRequestAuth, requireAdmin } from "../lib/auth.js";
+import { getRequestAuth, requireAdmin, requireStaffOrAdmin } from "../lib/auth.js";
 import { toPublic, toPublicList } from "../lib/serialize.js";
 import { OrderModel, ProductModel, TableModel } from "../models/index.js";
 import { uniqueOrderCode, withOrderCode } from "../models/order.js";
@@ -38,7 +38,7 @@ ordersRouter.get("/orders/stream", requireAdmin, (req, res) => {
   });
 });
 
-ordersRouter.get("/orders", requireAdmin, async (_req, res) => {
+ordersRouter.get("/orders", requireStaffOrAdmin, async (_req, res) => {
   const orders = await OrderModel.find().sort({ createdAt: -1 }).lean();
   res.json(toPublicList<Order>(orders).map(withOrderCode));
 });
@@ -131,7 +131,107 @@ ordersRouter.post("/orders", orderLimiter, async (req, res) => {
   res.status(201).json(withOrderCode(order));
 });
 
-ordersRouter.patch("/orders/:id", requireAdmin, async (req, res) => {
+function itemNote(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function sameLine(a: Pick<OrderItem, "productId" | "note">, b: Pick<OrderItem, "productId" | "note">): boolean {
+  return a.productId === b.productId && (a.note || "") === (b.note || "");
+}
+
+async function resolveOrderItems(
+  rawItems: unknown,
+  previous: OrderItem[],
+): Promise<{ error: string } | { items: OrderItem[] }> {
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    return { error: "ອໍເດີຕ້ອງມີຢ່າງໜ້ອຍ 1 ລາຍການ." };
+  }
+
+  const productIds = rawItems.map((raw) => {
+    const row = (raw ?? {}) as Record<string, unknown>;
+    return typeof row.productId === "string" ? row.productId : "";
+  });
+  const products = toPublicList<Product>(
+    await ProductModel.find({ id: { $in: productIds.filter(Boolean) } }).lean(),
+  );
+  const byId = new Map(products.map((product) => [product.id, product]));
+  const remaining = [...previous];
+  const items: OrderItem[] = [];
+
+  for (const raw of rawItems) {
+    const row = (raw ?? {}) as Record<string, unknown>;
+    const productId = typeof row.productId === "string" ? row.productId : "";
+    const quantity = Number(row.quantity);
+    const note = itemNote(row.note);
+
+    if (!productId || !Number.isInteger(quantity) || quantity <= 0 || quantity > 999) {
+      return { error: "ລາຍການອາຫານບໍ່ຖືກຕ້ອງ." };
+    }
+
+    const previousIndex = remaining.findIndex((item) => sameLine(item, { productId, note }));
+    if (previousIndex >= 0) {
+      const previousLine = remaining[previousIndex];
+      remaining.splice(previousIndex, 1);
+      if (previousLine) items.push({ ...previousLine, quantity, note });
+      continue;
+    }
+
+    const product = byId.get(productId);
+    if (!product) {
+      return { error: "ມີລາຍການທີ່ບໍ່ຢູ່ໃນເມນູແລ້ວ." };
+    }
+    if (!product.available) {
+      return { error: `ເມນູ "${product.name}" ໝົດແລ້ວ.` };
+    }
+
+    items.push({
+      productId: product.id,
+      name: product.name,
+      price: product.price,
+      quantity,
+      note,
+    });
+  }
+
+  return { items };
+}
+
+function orderTotal(items: OrderItem[]): number {
+  return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+}
+
+ordersRouter.put("/orders/:id/items", requireStaffOrAdmin, async (req, res) => {
+  const id = String(req.params.id ?? "");
+  const existing = toPublic<Order>(await OrderModel.findOne({ id }).lean());
+  if (!existing) {
+    res.status(404).json({ error: "ບໍ່ພົບອໍເດີ." });
+    return;
+  }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const resolved = await resolveOrderItems(body.items, existing.items);
+  if ("error" in resolved) {
+    res.status(400).json({ error: resolved.error });
+    return;
+  }
+
+  const updated = toPublic<Order>(
+    await OrderModel.findOneAndUpdate(
+      { id },
+      { $set: { items: resolved.items, total: orderTotal(resolved.items) } },
+      { returnDocument: "after" },
+    ).lean(),
+  );
+  if (!updated) {
+    res.status(404).json({ error: "ບໍ່ພົບອໍເດີ." });
+    return;
+  }
+
+  broadcastOrders({ type: "updated", orderId: updated.id, tableNumber: updated.tableNumber });
+  res.json(withOrderCode(updated));
+});
+
+ordersRouter.patch("/orders/:id", requireStaffOrAdmin, async (req, res) => {
   const status = (req.body as { status?: OrderStatus } | undefined)?.status;
   if (status !== "pending" && status !== "completed") {
     res.status(400).json({ error: "ສະຖານະອໍເດີບໍ່ຖືກຕ້ອງ." });
@@ -153,4 +253,16 @@ ordersRouter.patch("/orders/:id", requireAdmin, async (req, res) => {
 
   broadcastOrders({ type: "updated", orderId: updated.id });
   res.json(withOrderCode(updated));
+});
+
+ordersRouter.delete("/orders/:id", requireStaffOrAdmin, async (req, res) => {
+  const id = String(req.params.id ?? "");
+  const existing = toPublic<Order>(await OrderModel.findOneAndDelete({ id }).lean());
+  if (!existing) {
+    res.status(404).json({ error: "ບໍ່ພົບອໍເດີ." });
+    return;
+  }
+
+  broadcastOrders({ type: "deleted", orderId: existing.id, tableNumber: existing.tableNumber });
+  res.status(204).end();
 });

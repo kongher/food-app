@@ -1,17 +1,27 @@
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
+import { api } from "../api";
 import { formatClock, formatElapsed } from "../lib/format";
 import { menuUrlForTable } from "../lib/tableSession";
-import type { DiningTable, TableAction } from "../types";
+import { sessionOrdersForTable } from "../lib/tableBill";
+import type { Category, DiningTable, Order, Product, Shop, TableAction } from "../types";
+import { AddOrderItemDialog } from "./OrderCard";
+import { TableSessionBill } from "./TableSessionBill";
 
 interface BoardProps {
   tables: DiningTable[];
   canAdd?: boolean;
   adding?: boolean;
+  orders?: Order[];
+  products?: Product[];
+  categories?: Category[];
+  shop?: Shop;
   onAdd?: (number: number) => Promise<void>;
   onDelete?: (table: DiningTable) => Promise<void>;
   onAction?: (table: DiningTable, action: TableAction) => Promise<void>;
   onTransfer?: (table: DiningTable, toNumber: number) => Promise<void>;
+  onOrderUpdated?: (order: Order) => void;
+  onOrderRemoved?: (id: string) => void;
 }
 
 function tableTone(table: DiningTable): "call" | "busy" | "locked" | "empty" {
@@ -29,7 +39,21 @@ function tableLabel(table: DiningTable): string {
   return "ຫວ່າງ";
 }
 
-export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDelete, onAction, onTransfer }: BoardProps) {
+export function TableBoard({
+  tables,
+  canAdd = false,
+  adding = false,
+  orders = [],
+  products = [],
+  categories = [],
+  shop,
+  onAdd,
+  onDelete,
+  onAction,
+  onTransfer,
+  onOrderUpdated,
+  onOrderRemoved,
+}: BoardProps) {
   const [draft, setDraft] = useState("");
   const [selected, setSelected] = useState<DiningTable | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -186,10 +210,16 @@ export function TableBoard({ tables, canAdd = false, adding = false, onAdd, onDe
           table={selected}
           tables={tables}
           now={now}
+          orders={orders.filter((order) => order.tableNumber === selected.number)}
+          products={products}
+          categories={categories}
+          shop={shop}
           onClose={() => setSelected(null)}
           onAction={onAction ? (action) => onAction(selected, action) : undefined}
           onTransfer={onTransfer ? (toNumber) => onTransfer(selected, toNumber) : undefined}
           onDelete={onDelete ? () => onDelete(selected) : undefined}
+          onOrderUpdated={onOrderUpdated}
+          onOrderRemoved={onOrderRemoved}
         />
       )}
     </section>
@@ -200,18 +230,30 @@ function TableQrModal({
   table,
   tables,
   now,
+  orders,
+  products,
+  categories = [],
+  shop,
   onClose,
   onAction,
   onTransfer,
   onDelete,
+  onOrderUpdated,
+  onOrderRemoved,
 }: {
   table: DiningTable;
   tables: DiningTable[];
   now: number;
+  orders: Order[];
+  products: Product[];
+  categories?: Category[];
+  shop?: Shop;
   onClose: () => void;
   onAction?: (action: TableAction) => Promise<void>;
   onTransfer?: (toNumber: number) => Promise<void>;
   onDelete?: () => Promise<void>;
+  onOrderUpdated?: (order: Order) => void;
+  onOrderRemoved?: (id: string) => void;
 }) {
   const url = menuUrlForTable(table.number);
   const [dataUrl, setDataUrl] = useState("");
@@ -224,9 +266,12 @@ function TableQrModal({
   const [toNumber, setToNumber] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [actionError, setActionError] = useState("");
-  const busy = Boolean(acting) || deleting || transferring;
+  const [addingFirst, setAddingFirst] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const busy = Boolean(acting) || deleting || transferring || creating;
   const tone = tableTone(table);
   const emptyTargets = tables.filter((item) => item.id !== table.id && !item.occupied && !item.locked);
+  const sessionOrders = sessionOrdersForTable(orders, table.occupiedAt);
 
   useEffect(() => {
     setShowTransfer(false);
@@ -299,15 +344,32 @@ function TableQrModal({
     }
   }
 
+  async function addFirstItem(product: Product, quantity: number) {
+    setCreating(true);
+    setActionError("");
+    try {
+      const created = await api.createOrder({
+        tableNumber: table.number,
+        items: [{ productId: product.id, quantity }],
+      });
+      onOrderUpdated?.(created);
+      setAddingFirst(false);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "ເພີ່ມເມນູບໍ່ສຳເລັດ.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-[80] flex items-end justify-center bg-black/40 px-4 sm:items-center"
       onClick={() => {
-        if (!confirmDelete) onClose();
+        if (!confirmDelete && !addingFirst) onClose();
       }}
     >
       <div
-        className="relative mb-4 w-full max-w-sm rounded-3xl bg-white p-5 shadow-xl sm:mb-0"
+        className="relative mb-4 max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-5 shadow-xl sm:mb-0"
         onClick={(event) => event.stopPropagation()}
       >
         <button
@@ -340,6 +402,28 @@ function TableQrModal({
           <p className="mt-1 text-sm text-stone-500">ລູກຄ້າສະແກນ QR ແລ້ວຈະເຫັນວ່າໂຕະຖືກລັອກ.</p>
         ) : (
           <p className="mt-1 text-sm text-stone-500">ລູກຄ້າສະແກນໄດ້ແຕ່ເບິ່ງເມນູ. ກົດເປີດໂຕະເພື່ອໃຫ້ສັ່ງອາຫານ.</p>
+        )}
+        {shop && sessionOrders.length > 0 && (
+          <TableSessionBill
+            tableNumber={table.number}
+            occupiedAt={table.occupiedAt}
+            orders={sessionOrders}
+            products={products}
+            categories={categories}
+            shop={shop}
+            onUpdated={onOrderUpdated}
+            onRemoved={onOrderRemoved}
+          />
+        )}
+        {shop && table.occupied && sessionOrders.length === 0 && products.length > 0 && onOrderUpdated && (
+          <button
+            type="button"
+            disabled={creating}
+            onClick={() => setAddingFirst(true)}
+            className="mt-4 w-full rounded-2xl border border-orange-300 bg-orange-50 py-3 text-sm font-semibold text-orange-800 disabled:opacity-40"
+          >
+            + ເພີ່ມເມນູ
+          </button>
         )}
         <p className="mt-1 break-all text-xs text-stone-500">{url}</p>
         {/https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(url) && (
@@ -468,6 +552,14 @@ function TableQrModal({
           </button>
         )}
       </div>
+      {addingFirst && (
+        <AddOrderItemDialog
+          products={products}
+          categories={categories}
+          onAdd={(product, quantity) => void addFirstItem(product, quantity)}
+          onClose={() => setAddingFirst(false)}
+        />
+      )}
       {confirmDelete && (
         <div
           className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 p-4"

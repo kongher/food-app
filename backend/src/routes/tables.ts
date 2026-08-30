@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import { broadcastCalls, broadcastOrders, broadcastTables } from "../events.js";
+import { broadcastCalls, broadcastOrders, broadcastSongs, broadcastTables } from "../events.js";
 import { requireAdmin, requireStaffOrAdmin } from "../lib/auth.js";
 import { toPublic } from "../lib/serialize.js";
 import { OrderModel } from "../models/order.js";
+import { SongRequestModel } from "../models/songRequest.js";
 import { StaffCallModel } from "../models/staffCall.js";
 import { TableModel } from "../models/table.js";
 import type { DiningTable, GuestTableStatus, PublicTableStatus, TableAction } from "../types.js";
@@ -259,6 +260,18 @@ tablesRouter.post("/tables/:id/transfer", requireStaffOrAdmin, async (req, res) 
   if (pendingCalls.length > 0) {
     await StaffCallModel.updateMany({ tableNumber: fromNumber, status: "pending" }, { $set: { tableNumber: toNumber } });
     broadcastCalls({ type: "updated", callId: String(pendingCalls[0]?.id ?? ""), tableNumber: toNumber });
+  }
+
+  const songFilter: Record<string, unknown> = { tableNumber: fromNumber };
+  if (occupiedAt) {
+    songFilter.$or = [{ status: "pending" }, { createdAt: { $gte: occupiedAt } }];
+  } else {
+    songFilter.status = "pending";
+  }
+  const movedSongs = await SongRequestModel.find(songFilter, { id: 1 }).lean();
+  if (movedSongs.length > 0) {
+    await SongRequestModel.updateMany(songFilter, { $set: { tableNumber: toNumber } });
+    broadcastSongs({ type: "updated", songId: String(movedSongs[0]?.id ?? ""), tableNumber: toNumber });
   }
 
   const now = new Date().toISOString();

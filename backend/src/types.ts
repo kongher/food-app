@@ -40,11 +40,23 @@ export interface Shop {
   updatedAt: string;
 }
 
+export type SongRequestStatus = "pending" | "approved" | "rejected";
+
+export interface SongRequest {
+  id: string;
+  tableNumber: number;
+  title: string;
+  status: SongRequestStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Database {
   categories: Category[];
   products: Product[];
   orders: Order[];
   staffCalls: StaffCall[];
+  songRequests: SongRequest[];
 }
 
 export type StaffCallReason = "payment" | "refill" | "other";

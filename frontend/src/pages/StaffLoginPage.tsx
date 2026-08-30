@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { ShopBrand } from "../components/ShopBrand";
 import { useShop } from "../context/ShopContext";
-import { isStaffLoggedIn, saveSession } from "../lib/session";
+import { adminEntryPath, isStaffLoggedIn, saveSession } from "../lib/session";
 
 export function StaffLoginPage() {
   const navigate = useNavigate();
@@ -27,7 +27,12 @@ export function StaffLoginPage() {
         setError("ບັນຊີນີ້ບໍ່ແມ່ນພະນັກງານ.");
         return;
       }
-      saveSession(session);
+      saveSession({
+        token: session.token,
+        role: session.role,
+        username: session.username,
+        mustChangePassword: Boolean(session.mustChangePassword),
+      });
       navigate("/staff", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "ເຂົ້າສູ່ລະບົບບໍ່ສຳເລັດ.");
@@ -80,7 +85,7 @@ export function StaffLoginPage() {
         >
           {submitting ? "ກຳລັງເຂົ້າ..." : "ເຂົ້າສູ່ລະບົບ"}
         </button>
-        <Link to="/admin/login" className="mt-4 block text-center text-sm text-stone-400 underline">
+        <Link to={adminEntryPath()} className="mt-4 block text-center text-sm text-blue-600 underline">
           ເຈົ້າຂອງຮ້ານ · ແຜງຄວບຄຸມ
         </Link>
       </form>

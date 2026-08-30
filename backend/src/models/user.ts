@@ -8,6 +8,8 @@ const userSchema = new Schema<UserAccount>(
     name: { type: String, default: "", trim: true },
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ["admin", "staff"], required: true },
+    tokenVersion: { type: Number, default: 0 },
+    mustChangePassword: { type: Boolean, default: false },
     createdAt: { type: String, required: true },
   },
   { versionKey: false, collection: "users" },

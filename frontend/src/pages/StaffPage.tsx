@@ -1,32 +1,136 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { ShopBrand } from "../components/ShopBrand";
+import { SongRequestsBoard } from "../components/SongRequestsBoard";
 import { TableBoard } from "../components/TableBoard";
 import { CartProvider } from "../context/CartContext";
+import { useShop } from "../context/ShopContext";
 import { playStaffAlert, unlockAudio } from "../lib/alert";
 import { connectDeskSocket } from "../lib/deskSocket";
 import { formatTime } from "../lib/format";
-import { getSession, logoutSession } from "../lib/session";
+import { getSession, logoutSession, saveSession } from "../lib/session";
 import { staffCallLabel, staffCallTimes, staffCallWhen } from "../lib/staffCall";
-import type { Category, DiningTable, Product, StaffCall, TableAction } from "../types";
+import type { Category, DiningTable, Order, Product, SongRequest, StaffCall, TableAction } from "../types";
 import { CustomerMenu } from "./CustomerPage";
 
-type StaffTab = "calls" | "tables" | "menu";
+type StaffTab = "calls" | "songs" | "tables" | "menu";
 
 export function StaffPage() {
   return (
     <CartProvider>
-      <StaffDashboard />
+      <StaffPasswordGate />
     </CartProvider>
+  );
+}
+
+function StaffPasswordGate() {
+  const navigate = useNavigate();
+  const [gate, setGate] = useState<"checking" | "change" | "ok">(() =>
+    getSession()?.mustChangePassword ? "change" : "checking",
+  );
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getMe()
+      .then((me) => {
+        if (cancelled) return;
+        const session = getSession();
+        if (session) saveSession({ ...session, mustChangePassword: me.mustChangePassword });
+        setGate(me.mustChangePassword ? "change" : "ok");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (!getSession()) {
+          logoutSession();
+          navigate("/staff/login", { replace: true });
+          return;
+        }
+        setGate(getSession()?.mustChangePassword ? "change" : "ok");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(""), 2000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  if (gate === "checking") {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-[#fff7ed] text-stone-500">ກຳລັງໂຫຼດ...</div>
+    );
+  }
+
+  if (gate === "change") {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-[#fff7ed] px-5 py-8">
+        <div className="w-full max-w-md">
+          <div className="mb-4 flex items-center justify-between">
+            <ShopBrand
+              nameClassName="text-xs font-semibold text-orange-700"
+              logoClassName="h-10 w-10 rounded-full object-cover"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                logoutSession();
+                navigate("/staff/login", { replace: true });
+              }}
+              className="rounded-full border border-stone-200 bg-white px-3 py-1 text-sm text-stone-800"
+            >
+              ອອກຈາກລະບົບ
+            </button>
+          </div>
+          <ChangePasswordForm
+            forced
+            onSuccess={() => {
+              setGate("ok");
+              setMessage("ປ່ຽນລະຫັດຜ່ານແລ້ວ. ກະລຸນາໃຊ້ລະຫັດໃໝ່ຕໍ່ໄປ.");
+            }}
+          />
+        </div>
+        {message && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-6" onClick={() => setMessage("")}>
+            <div className="max-w-sm rounded-3xl bg-white px-8 py-7 text-center shadow-xl" onClick={(event) => event.stopPropagation()}>
+              <p className="text-4xl">✅</p>
+              <p className="font-display mt-3 text-xl text-stone-900">{message}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <StaffDashboard />
+      {message && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 px-6" onClick={() => setMessage("")}>
+          <div className="max-w-sm rounded-3xl bg-white px-8 py-7 text-center shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <p className="text-4xl">✅</p>
+            <p className="font-display mt-3 text-xl text-stone-900">{message}</p>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
 function StaffDashboard() {
   const navigate = useNavigate();
+  const { shop } = useShop();
   const session = getSession();
   const [tab, setTab] = useState<StaffTab>("calls");
   const [calls, setCalls] = useState<StaffCall[]>([]);
+  const [songs, setSongs] = useState<SongRequest[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,8 +139,10 @@ function StaffDashboard() {
   const [message, setMessage] = useState("");
   const [tables, setTables] = useState<DiningTable[]>([]);
   const knownCallTimes = useRef<Map<string, number> | null>(null);
+  const knownSongIds = useRef<Set<string> | null>(null);
 
   const pendingCalls = useMemo(() => calls.filter((call) => call.status === "pending"), [calls]);
+  const pendingSongs = useMemo(() => songs.filter((song) => song.status === "pending"), [songs]);
 
   async function loadCalls(options?: { detectNew?: boolean }) {
     const data = await api.getCalls();
@@ -54,6 +160,16 @@ function StaffDashboard() {
     void api.getTables().then(setTables).catch(() => undefined);
   }
 
+  async function loadSongs(options?: { detectNew?: boolean }) {
+    const data = await api.getSongs();
+    if (options?.detectNew && knownSongIds.current) {
+      const newcomers = data.filter((song) => song.status === "pending" && !knownSongIds.current?.has(song.id));
+      if (newcomers.length > 0) playStaffAlert({ force: true, vibrate: true });
+    }
+    knownSongIds.current = new Set(data.map((song) => song.id));
+    setSongs(data);
+  }
+
   async function loadMenu() {
     setMenuLoading(true);
     try {
@@ -67,8 +183,25 @@ function StaffDashboard() {
     }
   }
 
+  async function loadOrders() {
+    setOrders(await api.getOrders());
+  }
+
+  function upsertOrder(updated: Order) {
+    setOrders((current) => {
+      if (current.some((order) => order.id === updated.id)) {
+        return current.map((order) => (order.id === updated.id ? updated : order));
+      }
+      return [updated, ...current];
+    });
+  }
+
+  function removeOrder(id: string) {
+    setOrders((current) => current.filter((order) => order.id !== id));
+  }
+
   useEffect(() => {
-    void loadCalls()
+    void Promise.all([loadCalls(), loadSongs(), loadOrders(), loadMenu()])
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "ໂຫຼດຄຳຮ້ອງຂໍບໍ່ສຳເລັດ.");
       })
@@ -84,7 +217,14 @@ function StaffDashboard() {
       }
       void loadCalls();
     });
+    socket.on("songs", (payload: { type?: string }) => {
+      if (payload.type === "created") {
+        playStaffAlert({ force: true, vibrate: true });
+      }
+      void loadSongs();
+    });
     socket.on("orders", () => {
+      void loadOrders().catch(() => undefined);
       void api.getTables().then(setTables).catch(() => undefined);
     });
 
@@ -94,6 +234,8 @@ function StaffDashboard() {
 
     const poll = window.setInterval(() => {
       void loadCalls({ detectNew: true });
+      void loadSongs({ detectNew: true });
+      void loadOrders().catch(() => undefined);
     }, 8000);
 
     return () => {
@@ -125,6 +267,26 @@ function StaffDashboard() {
     }
   }
 
+  async function approveSong(id: string) {
+    try {
+      await api.setSongStatus(id, "approved");
+      await loadSongs();
+      setMessage("ອະນຸມັດເພງແລ້ວ.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ອັບເດດຄຳຮ້ອງເພງບໍ່ສຳເລັດ.");
+    }
+  }
+
+  async function removeSong(id: string) {
+    try {
+      await api.deleteSong(id);
+      await loadSongs();
+      setMessage("ລຶບຄຳຮ້ອງເພງແລ້ວ.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ລຶບຄຳຮ້ອງເພງບໍ່ສຳເລັດ.");
+    }
+  }
+
   async function setTableStatus(table: DiningTable, action: TableAction) {
     setError("");
     await api.setTableAction(table.id, action);
@@ -141,9 +303,10 @@ function StaffDashboard() {
   async function transferTable(table: DiningTable, toNumber: number) {
     setError("");
     await api.transferTable(table.id, toNumber);
-    const [nextTables, nextCalls] = await Promise.all([api.getTables(), api.getCalls()]);
+    const [nextTables, nextCalls, nextSongs] = await Promise.all([api.getTables(), api.getCalls(), api.getSongs()]);
     setTables(nextTables);
     setCalls(nextCalls);
+    setSongs(nextSongs);
     setMessage(`ຍ້າຍອໍເດີຈາກໂຕະ ${table.number} ໄປໂຕະ ${toNumber} ແລ້ວ.`);
   }
 
@@ -178,6 +341,18 @@ function StaffDashboard() {
             ແຈ້ງເຕືອນ
             {pendingCalls.length > 0 && (
               <span className="rounded-full bg-orange-500 px-1.5 text-[10px] font-bold text-white">{pendingCalls.length}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("songs")}
+            className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 py-2.5 text-sm font-semibold ${
+              tab === "songs" ? "border-orange-600 text-orange-700" : "border-transparent text-stone-400"
+            }`}
+          >
+            ເພງ
+            {pendingSongs.length > 0 && (
+              <span className="rounded-full bg-orange-500 px-1.5 text-[10px] font-bold text-white">{pendingSongs.length}</span>
             )}
           </button>
           <button
@@ -261,10 +436,33 @@ function StaffDashboard() {
         </main>
       )}
 
+      {tab === "songs" && (
+        <main className="px-4 pt-4 pb-8">
+          {error && <p className="mb-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+          <SongRequestsBoard
+            compact
+            songs={songs}
+            loading={loading}
+            onApprove={(id) => approveSong(id)}
+            onDelete={(id) => removeSong(id)}
+          />
+        </main>
+      )}
+
       {tab === "tables" && (
         <main className="px-4 pt-4 pb-8">
           {error && <p className="mb-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
-          <TableBoard tables={tables} onAction={setTableStatus} onTransfer={transferTable} />
+          <TableBoard
+            tables={tables}
+            orders={orders}
+            products={products}
+            categories={categories}
+            shop={shop}
+            onAction={setTableStatus}
+            onTransfer={transferTable}
+            onOrderUpdated={upsertOrder}
+            onOrderRemoved={removeOrder}
+          />
         </main>
       )}
 
