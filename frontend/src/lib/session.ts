@@ -4,6 +4,7 @@ export interface AuthSession {
   token: string;
   role: UserRole;
   username: string;
+  mustChangePassword?: boolean;
 }
 
 const KEY = "food-app-auth";
@@ -41,6 +42,10 @@ export function isAdminLoggedIn(): boolean {
 
 export function isStaffLoggedIn(): boolean {
   return getSession()?.role === "staff";
+}
+
+export function adminEntryPath(): "/admin" | "/admin/login" {
+  return isAdminLoggedIn() ? "/admin" : "/admin/login";
 }
 
 export function logoutSession(): void {

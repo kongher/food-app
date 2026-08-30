@@ -95,6 +95,7 @@ export interface StaffAccount {
   name: string;
   role: "staff";
   createdAt: string;
+  mustChangePassword?: boolean;
 }
 
 export interface StaffCall {
@@ -104,6 +105,17 @@ export interface StaffCall {
   message: string;
   status: StaffCallStatus;
   times: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SongRequestStatus = "pending" | "approved" | "rejected";
+
+export interface SongRequest {
+  id: string;
+  tableNumber: number;
+  title: string;
+  status: SongRequestStatus;
   createdAt: string;
   updatedAt: string;
 }

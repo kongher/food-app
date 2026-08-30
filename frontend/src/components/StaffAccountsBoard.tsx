@@ -3,7 +3,8 @@ import { api } from "../api";
 import { formatTime } from "../lib/format";
 import type { StaffAccount } from "../types";
 
-const emptyForm = { name: "", username: "", password: "" };
+const emptyForm = { name: "", username: "" };
+const emptyEditForm = { name: "", username: "", password: "" };
 
 export function StaffAccountsBoard({
   onMessage,
@@ -15,7 +16,7 @@ export function StaffAccountsBoard({
   const [staff, setStaff] = useState<StaffAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyForm);
-  const [editForm, setEditForm] = useState(emptyForm);
+  const [editForm, setEditForm] = useState(emptyEditForm);
   const [editing, setEditing] = useState<StaffAccount | null>(null);
   const [deleting, setDeleting] = useState<StaffAccount | null>(null);
   const [saving, setSaving] = useState(false);
@@ -56,24 +57,22 @@ export function StaffAccountsBoard({
 
   async function saveStaff(event: FormEvent, mode: "add" | "edit") {
     event.preventDefault();
-    const payload = mode === "edit" ? editForm : form;
     setSaving(true);
     onError("");
     try {
       if (mode === "edit" && editing) {
         await api.updateStaff(editing.id, {
-          name: payload.name,
-          username: payload.username,
-          password: payload.password.trim() || undefined,
+          name: editForm.name,
+          username: editForm.username,
+          password: editForm.password.trim() || undefined,
         });
         setEditing(null);
-        setEditForm(emptyForm);
+        setEditForm(emptyEditForm);
         onMessage("ອັບເດດບັນຊີພະນັກງານແລ້ວ.");
       } else {
         await api.createStaff({
-          name: payload.name,
-          username: payload.username,
-          password: payload.password,
+          name: form.name,
+          username: form.username,
         });
         setForm(emptyForm);
         onMessage("ເພີ່ມພະນັກງານແລ້ວ.");
@@ -111,7 +110,7 @@ export function StaffAccountsBoard({
     <section className="grid gap-6 lg:grid-cols-[320px_1fr]">
       <form onSubmit={(event) => void saveStaff(event, "add")} className="h-fit rounded-3xl bg-white p-5 shadow-sm">
         <h2 className="font-display text-xl text-stone-900">ເພີ່ມພະນັກງານ</h2>
-        <p className="mt-1 text-sm text-stone-500">ບັນຊີນີ້ໃຊ້ເພື່ອເຂົ້າໜ້າພະນັກງານ.</p>
+        <p className="mt-1 text-sm text-stone-500">ບັນຊີນີ້ໃຊ້ເພື່ອເຂົ້າໜ້າພະນັກງານ. ລະຫັດເລີ່ມຕົ້ນແມ່ນ 123456 ພະນັກງານຕ້ອງປ່ຽນເມື່ອເຂົ້າຄັ້ງທຳອິດ.</p>
         <label className="mt-4 block text-sm font-medium">
           ຊື່ພະນັກງານ
           <input
@@ -132,18 +131,9 @@ export function StaffAccountsBoard({
             className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2"
           />
         </label>
-        <label className="mt-3 block text-sm font-medium">
-          ລະຫັດຜ່ານ
-          <input
-            required
-            type="password"
-            autoComplete="new-password"
-            minLength={6}
-            value={form.password}
-            onChange={(event) => setForm({ ...form, password: event.target.value })}
-            className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2"
-          />
-        </label>
+        <p className="mt-3 rounded-2xl bg-orange-50 px-3 py-2 text-sm text-orange-800">
+          ລະຫັດຜ່ານເລີ່ມຕົ້ນ: <span className="font-semibold">123456</span>
+        </p>
         <button disabled={saving} className="mt-4 w-full rounded-2xl bg-orange-600 py-3 font-semibold text-white disabled:opacity-60">
           {saving && !editing ? "ກຳລັງບັນທຶກ..." : "ເພີ່ມບັນຊີ"}
         </button>
@@ -175,6 +165,9 @@ export function StaffAccountsBoard({
               <div className="min-w-0">
                 <p className="font-semibold text-stone-900">{account.name}</p>
                 <p className="text-sm text-stone-500">@{account.username}</p>
+                {account.mustChangePassword && (
+                  <p className="mt-1 text-xs font-medium text-orange-700">ຍັງໃຊ້ລະຫັດເລີ່ມຕົ້ນ</p>
+                )}
                 <p className="mt-1 text-xs text-stone-400">{formatTime(account.createdAt)}</p>
               </div>
               <div className="flex shrink-0 gap-2">
@@ -241,7 +234,7 @@ export function StaffAccountsBoard({
                 minLength={6}
                 value={editForm.password}
                 onChange={(event) => setEditForm({ ...editForm, password: event.target.value })}
-                placeholder="ຫວ່າງໄວ້ຖ້າບໍ່ປ່ຽນ"
+                placeholder="ຫວ່າງໄວ້ຖ້າບໍ່ປ່ຽນ · ໃສ່ 123456 ເພື່ອຣີເຊັດ"
                 className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2"
               />
             </label>

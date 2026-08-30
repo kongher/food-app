@@ -3,10 +3,12 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
 import { ShopWelcome } from "../components/ShopWelcome";
 import { CustomerBottomNav, type CustomerNavTab } from "../components/CustomerBottomNav";
+import { GuestMusicPanel } from "../components/GuestMusicPanel";
 import { useCart } from "../context/CartContext";
 import { formatTime, formatVnd, onImgError } from "../lib/format";
 import { displayOrderCode } from "../lib/orderCode";
 import { isValidTableNumber, saveTableNumber, tableMenuPath } from "../lib/tableSession";
+import { adminEntryPath, isAdminLoggedIn } from "../lib/session";
 import type { Category, Order, Product, PublicTableStatus, StaffCallReason } from "../types";
 
 const NOTE_PRESETS = [
@@ -75,6 +77,7 @@ export function CustomerMenu({
       ? tableFromPath
       : NaN;
   const hasTable = isValidTableNumber(tableNumber);
+  const isAdminPreview = !isStaff && !hasTable && isAdminLoggedIn();
 
   useEffect(() => {
     if (isStaff || !isValidTableNumber(tableFromPath)) return;
@@ -162,10 +165,12 @@ export function CustomerMenu({
 
   const canOrder = isStaff || (Boolean(tableStatus?.canOrder) && !sessionEnded);
   const canCall = isStaff || (Boolean(tableStatus?.canCall) && !sessionEnded);
-  const tableLocked = !isStaff && tableStatus?.status === "locked";
-  const browseMessage = sessionEnded
-    ? "ໂຕະຖືກປິດແລ້ວ. ກະລຸນາສະແກນລະຫັດ QR ໃໝ່ເພື່ອສັ່ງອາຫານ."
-    : "ໂຕະຍັງບໍ່ໄດ້ເປີດ. ທ່ານສາມາດເບິ່ງເມນູໄດ້ແຕ່ຍັງບໍ່ສາມາດສັ່ງອາຫານ ຫຼື ເອີ້ນພະນັກງານ.";
+  const tableLocked = !isStaff && !isAdminPreview && tableStatus?.status === "locked";
+  const browseMessage = isAdminPreview
+    ? "ນີ້ແມ່ນໜ້າເບິ່ງເມນູຂອງລູກຄ້າ. ບໍ່ສາມາດສັ່ງອາຫານ ຫຼື ເອີ້ນພະນັກງານໄດ້."
+    : sessionEnded
+      ? "ໂຕະຖືກປິດແລ້ວ. ກະລຸນາສະແກນລະຫັດ QR ໃໝ່ເພື່ອສັ່ງອາຫານ."
+      : "ໂຕະຍັງບໍ່ໄດ້ເປີດ. ທ່ານສາມາດເບິ່ງເມນູໄດ້ແຕ່ຍັງບໍ່ສາມາດສັ່ງອາຫານ ຫຼື ເອີ້ນພະນັກງານ.";
 
   const grouped = useMemo(() => {
     const map = new Map<string, Product[]>();
@@ -205,7 +210,7 @@ export function CustomerMenu({
   }, [filteredProducts]);
 
   function openDraft(product: Product) {
-    if (!canOrder) {
+    if (!canOrder && !isAdminPreview) {
       setBrowseNotice(true);
       return;
     }
@@ -282,7 +287,7 @@ export function CustomerMenu({
     return <Navigate to="/" replace />;
   }
 
-  if (!hasTable && !isStaff) {
+  if (!hasTable && !isStaff && !isAdminPreview) {
     return (
       <div className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center px-5">
         <ShopWelcome />
@@ -313,7 +318,7 @@ export function CustomerMenu({
             ເຂົ້າເມນູ
           </button>
         </form>
-        <Link to="/admin/login" className="mt-8 text-center text-sm text-stone-400 underline">
+        <Link to={adminEntryPath()} className="mt-8 text-center text-sm text-stone-400 underline">
           ສຳລັບຮ້ານ · ໜ້າຈັດການ
         </Link>
         <Link to="/staff/login" className="mt-2 text-center text-sm text-stone-400 underline">
@@ -370,6 +375,12 @@ export function CustomerMenu({
                   className="mt-1 w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 outline-none focus:border-orange-500"
                 />
               </label>
+            ) : isAdminPreview ? (
+              <>
+                <ShopWelcome />
+                <h1 className="font-display mt-1 text-2xl text-stone-900">ເມນູລູກຄ້າ</h1>
+                <p className="text-sm text-stone-500">ໜ້າເບິ່ງສຳລັບຮ້ານ · ບໍ່ຕ້ອງໃສ່ເລກໂຕະ</p>
+              </>
             ) : (
               <>
                 <ShopWelcome />
@@ -379,7 +390,7 @@ export function CustomerMenu({
           </div>
           {!isStaff && (
             <Link
-              to="/admin"
+              to={adminEntryPath()}
               className="mt-1 shrink-0 rounded-full border border-stone-200 bg-white px-3 py-1 text-xs text-stone-500"
             >
               ຈັດການ
@@ -430,7 +441,13 @@ export function CustomerMenu({
       <main className="px-4 pt-4">
         {(isStaff || guestTab === "menu") && (
           <>
-            {!isStaff && !canOrder && (
+            {isAdminPreview && (
+              <div className="mb-4 rounded-2xl bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                <p className="font-semibold">ໜ້າເບິ່ງເມນູລູກຄ້າ</p>
+                <p className="mt-1">{browseMessage}</p>
+              </div>
+            )}
+            {!isStaff && !canOrder && !isAdminPreview && (
               <div className="mb-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <p className="font-semibold">{sessionEnded ? "ໂຕະຖືກປິດແລ້ວ" : "ໂຕະຍັງບໍ່ໄດ້ເປີດ"}</p>
                 <p className="mt-1">{browseMessage}</p>
@@ -460,11 +477,7 @@ export function CustomerMenu({
 
         {!isStaff && guestTab === "orders" && <GuestOrdersPanel orders={myOrders} />}
         {!isStaff && guestTab === "music" && (
-          <article className="rounded-3xl bg-white p-8 text-center shadow-sm">
-            <p className="text-4xl">🎵</p>
-            <h2 className="font-display mt-3 text-2xl text-stone-900">ເພງ</h2>
-            <p className="mt-2 text-sm text-stone-500">ເລືອກເພງ ຫຼື ສິ່ງອຳນວຍຄວາມສະດວກຈະມາໃນໄວໆນີ້.</p>
-          </article>
+          <GuestMusicPanel tableNumber={tableNumber} canRequest={canCall} browseMessage={browseMessage} />
         )}
         {!isStaff && guestTab === "promo" && (
           <article className="rounded-3xl bg-white p-8 text-center shadow-sm">
@@ -475,7 +488,7 @@ export function CustomerMenu({
         )}
       </main>
 
-      {canOrder && count > 0 && !cartOpen && (
+      {(canOrder || isAdminPreview) && count > 0 && !cartOpen && (
         <button
           type="button"
           onClick={() => setCartOpen(true)}
@@ -504,7 +517,7 @@ export function CustomerMenu({
         </button>
       )}
 
-      {canCall && !isStaff && !cartOpen && !draftProduct && !callOpen && (
+      {(canCall || isAdminPreview) && !isStaff && !cartOpen && !draftProduct && !callOpen && (
         <div
           className={`pointer-events-none fixed inset-x-0 z-40 mx-auto h-0 max-w-lg ${
             count > 0
@@ -578,7 +591,15 @@ export function CustomerMenu({
               onClick={() => placeOrder(tableNumber)}
               className="mt-4 w-full rounded-2xl bg-orange-600 py-4 font-semibold text-white disabled:opacity-60"
             >
-              {submitting ? "ກຳລັງສົ່ງ..." : !canOrder ? "ໂຕະຍັງບໍ່ໄດ້ເປີດ" : hasTable ? "ສັ່ງອາຫານດຽວນີ້" : "ກະລຸນາໃສ່ເລກໂຕະ"}
+              {submitting
+                ? "ກຳລັງສົ່ງ..."
+                : isAdminPreview
+                  ? "ໜ້າເບິ່ງເທົ່ານັ້ນ"
+                  : !canOrder
+                    ? "ໂຕະຍັງບໍ່ໄດ້ເປີດ"
+                    : hasTable
+                      ? "ສັ່ງອາຫານດຽວນີ້"
+                      : "ກະລຸນາໃສ່ເລກໂຕະ"}
             </button>
           </div>
         </div>
