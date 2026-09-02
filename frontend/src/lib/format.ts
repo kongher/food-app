@@ -2,6 +2,30 @@ export function formatVnd(value: number): string {
   return new Intl.NumberFormat("lo-LA").format(value) + " ກີບ";
 }
 
+const MAX_AMOUNT_DIGITS = 12;
+
+export function digitsOnly(value: string): string {
+  return value.replace(/[^\d]/g, "").replace(/^0+(?=\d)/, "").slice(0, MAX_AMOUNT_DIGITS);
+}
+
+/** Digits only → 10.000 / 100.000 / 1.000.000 */
+export function formatGroupedAmount(value: string | number): string {
+  const digits = digitsOnly(String(value));
+  if (!digits) return "";
+  const groups: string[] = [];
+  for (let i = digits.length; i > 0; i -= 3) {
+    groups.unshift(digits.slice(Math.max(0, i - 3), i));
+  }
+  return groups.join(".");
+}
+
+export function parseGroupedAmount(value: string): number | null {
+  const digits = digitsOnly(value);
+  if (!digits) return null;
+  const amount = Number(digits);
+  return Number.isFinite(amount) ? amount : null;
+}
+
 export function formatTime(iso: string): string {
   const date = new Date(iso);
   const day = String(date.getDate()).padStart(2, "0");

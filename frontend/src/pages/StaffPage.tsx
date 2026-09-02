@@ -12,7 +12,7 @@ import { connectDeskSocket } from "../lib/deskSocket";
 import { formatTime } from "../lib/format";
 import { getSession, logoutSession, saveSession } from "../lib/session";
 import { staffCallLabel, staffCallTimes, staffCallWhen } from "../lib/staffCall";
-import type { Category, DiningTable, Order, Product, SongRequest, StaffCall, TableAction } from "../types";
+import type { Category, DiningTable, Order, Product, SongRequest, StaffCall, TableAction, TableActionOptions } from "../types";
 import { CustomerMenu } from "./CustomerPage";
 
 type StaffTab = "calls" | "songs" | "tables" | "menu";
@@ -287,13 +287,20 @@ function StaffDashboard() {
     }
   }
 
-  async function setTableStatus(table: DiningTable, action: TableAction) {
+  async function setTableStatus(table: DiningTable, action: TableAction, extra?: TableActionOptions) {
     setError("");
-    await api.setTableAction(table.id, action);
+    await api.setTableAction(table.id, action, extra);
     setTables(await api.getTables());
+    if (action === "close") await loadOrders();
+    const payLabel =
+      extra?.paymentMethod === "cash"
+        ? " · ເງິນສົດ"
+        : extra?.paymentMethod === "transfer"
+          ? " · ໂອນເງິນ"
+          : "";
     const messages: Record<TableAction, string> = {
       open: `ເປີດໂຕະ ${table.number} ແລ້ວ.`,
-      close: `ປິດໂຕະ ${table.number} ແລ້ວ.`,
+      close: `ປິດໂຕະ ${table.number} ແລ້ວ${payLabel}.`,
       lock: `ລັອກໂຕະ ${table.number} ແລ້ວ.`,
       unlock: `ປົດລັອກໂຕະ ${table.number} ແລ້ວ.`,
     };

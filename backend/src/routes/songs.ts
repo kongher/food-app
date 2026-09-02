@@ -49,8 +49,19 @@ songsRouter.get("/songs", async (req, res) => {
       res.status(400).json({ error: "ເລກໂຕະບໍ່ຖືກຕ້ອງ." });
       return;
     }
+    const table = await TableModel.findOne({ number: tableNumber }).lean();
+    if (!table?.occupied) {
+      res.json([]);
+      return;
+    }
+    const occupiedAt = typeof table.occupiedAt === "string" && table.occupiedAt ? table.occupiedAt : null;
     const songs = toPublicList<SongRequest>(
-      await SongRequestModel.find({ tableNumber }).sort({ createdAt: -1 }).lean(),
+      await SongRequestModel.find({
+        tableNumber,
+        ...(occupiedAt ? { createdAt: { $gte: occupiedAt } } : {}),
+      })
+        .sort({ createdAt: -1 })
+        .lean(),
     );
     res.json(songs);
     return;

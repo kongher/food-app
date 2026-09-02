@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { api } from "../api";
 import { displayOrderCode } from "../lib/orderCode";
 import { formatTime, formatVnd, onImgError } from "../lib/format";
+import { PAYMENT_METHOD_LABEL } from "../lib/payment";
 import { printOrderBill } from "../lib/printBill";
 import type { Category, Order, OrderItem, Product, Shop } from "../types";
 
@@ -113,6 +114,15 @@ export function OrderCard({
           <p className="font-mono text-sm font-bold tracking-wide text-orange-700">{code}</p>
           <p className="font-display text-2xl text-stone-900">ໂຕະ {order.tableNumber}</p>
           <p className="text-sm text-stone-500">{formatTime(order.createdAt)}</p>
+          {completed && order.paymentMethod && (
+            <p
+              className={`mt-1 text-xs font-semibold ${
+                order.paymentMethod === "cash" ? "text-emerald-700" : "text-sky-700"
+              }`}
+            >
+              {PAYMENT_METHOD_LABEL[order.paymentMethod]}
+            </p>
+          )}
         </div>
         <span
           className={`rounded-full px-3 py-1 text-sm font-semibold ${

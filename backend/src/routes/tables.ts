@@ -7,7 +7,7 @@ import { OrderModel } from "../models/order.js";
 import { SongRequestModel } from "../models/songRequest.js";
 import { StaffCallModel } from "../models/staffCall.js";
 import { TableModel } from "../models/table.js";
-import type { DiningTable, GuestTableStatus, PublicTableStatus, TableAction } from "../types.js";
+import type { DiningTable, GuestTableStatus, PaymentMethod, PublicTableStatus, TableAction } from "../types.js";
 
 export const tablesRouter = Router();
 
@@ -47,15 +47,22 @@ function asTable(doc: unknown, busy: Occupancy): DiningTable | null {
   };
 }
 
-function publicStatus(table: { number: number; occupied?: boolean; locked?: boolean }): PublicTableStatus {
+function publicStatus(table: {
+  number: number;
+  occupied?: boolean;
+  locked?: boolean;
+  sessionId?: string | null;
+}): PublicTableStatus {
   const occupied = Boolean(table.occupied);
   const locked = Boolean(table.locked) && !occupied;
   const status: GuestTableStatus = locked ? "locked" : occupied ? "occupied" : "empty";
+  const sessionId = occupied && typeof table.sessionId === "string" && table.sessionId ? table.sessionId : null;
   return {
     number: Number(table.number),
     status,
     canOrder: status === "occupied",
     canCall: status === "occupied",
+    sessionId,
   };
 }
 
@@ -68,6 +75,21 @@ function parseAction(body: { action?: unknown; occupied?: unknown; locked?: unkn
   if (body.locked === true) return "lock";
   if (body.locked === false) return "unlock";
   return null;
+}
+
+function parsePaymentMethod(value: unknown): PaymentMethod | null {
+  if (value === "cash" || value === "transfer") return value;
+  return null;
+}
+
+function sessionOrderFilter(tableNumber: number, occupiedAt?: string | null): Record<string, unknown> {
+  const filter: Record<string, unknown> = { tableNumber };
+  if (occupiedAt) {
+    filter.$or = [{ status: "pending" }, { status: "completed", createdAt: { $gte: occupiedAt } }];
+  } else {
+    filter.status = "pending";
+  }
+  return filter;
 }
 
 async function occupancy(): Promise<Occupancy> {
@@ -146,7 +168,13 @@ tablesRouter.post("/tables", requireAdmin, async (req, res) => {
 
 tablesRouter.patch("/tables/:id", requireStaffOrAdmin, async (req, res) => {
   const id = String(req.params.id ?? "");
-  const action = parseAction((req.body ?? {}) as { action?: unknown; occupied?: unknown; locked?: unknown });
+  const body = (req.body ?? {}) as {
+    action?: unknown;
+    occupied?: unknown;
+    locked?: unknown;
+    paymentMethod?: unknown;
+  };
+  const action = parseAction(body);
   if (!action) {
     res.status(400).json({ error: "ສະຖານະໂຕະບໍ່ຖືກຕ້ອງ." });
     return;
@@ -169,6 +197,24 @@ tablesRouter.patch("/tables/:id", requireStaffOrAdmin, async (req, res) => {
       sessionId: current.occupied && current.sessionId ? current.sessionId : randomUUID(),
     };
   } else if (action === "close") {
+    const occupiedAt = typeof current.occupiedAt === "string" && current.occupiedAt ? current.occupiedAt : null;
+    const sessionFilter = sessionOrderFilter(Number(current.number), occupiedAt);
+    const sessionOrders = await OrderModel.find(sessionFilter, { id: 1, total: 1 }).lean();
+    const due = sessionOrders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+    if (due > 0) {
+      const paymentMethod = parsePaymentMethod(body.paymentMethod);
+      if (!paymentMethod) {
+        res.status(400).json({ error: "ກະລຸນາເລືອກວິທີຊຳລະ." });
+        return;
+      }
+      await OrderModel.updateMany(sessionFilter, {
+        $set: { status: "completed", paymentMethod, paidAt: now },
+      });
+      const firstId = String(sessionOrders[0]?.id ?? "");
+      if (firstId) {
+        broadcastOrders({ type: "updated", orderId: firstId, tableNumber: current.number });
+      }
+    }
     update = { occupied: false, occupiedAt: null, locked: false, sessionId: null };
   } else if (action === "lock") {
     if (current.occupied) {
@@ -246,12 +292,7 @@ tablesRouter.post("/tables/:id/transfer", requireStaffOrAdmin, async (req, res) 
   const fromNumber = Number(source.number);
   const occupiedAt =
     typeof source.occupiedAt === "string" && source.occupiedAt ? source.occupiedAt : null;
-  const orderFilter: Record<string, unknown> = { tableNumber: fromNumber };
-  if (occupiedAt) {
-    orderFilter.$or = [{ status: "pending" }, { status: "completed", createdAt: { $gte: occupiedAt } }];
-  } else {
-    orderFilter.status = "pending";
-  }
+  const orderFilter = sessionOrderFilter(fromNumber, occupiedAt);
 
   const movedOrders = await OrderModel.find(orderFilter, { id: 1 }).lean();
   await OrderModel.updateMany(orderFilter, { $set: { tableNumber: toNumber } });

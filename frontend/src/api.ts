@@ -5,12 +5,15 @@ import type {
   Order,
   Product,
   ProductInput,
+  Promotion,
+  PromotionInput,
   PublicTableStatus,
   Shop,
   StaffAccount,
   StaffCall,
   StaffCallReason,
   TableAction,
+  TableActionOptions,
   SongRequest,
   SongRequestStatus,
 } from "./types";
@@ -151,8 +154,11 @@ export const api = {
   createTable: (body: { number: number }) =>
     request<DiningTable>("/api/tables", { method: "POST", body: JSON.stringify(body) }),
   deleteTable: (id: string) => request<void>(`/api/tables/${id}`, { method: "DELETE" }),
-  setTableAction: (id: string, action: TableAction) =>
-    request<DiningTable>(`/api/tables/${id}`, { method: "PATCH", body: JSON.stringify({ action }) }),
+  setTableAction: (id: string, action: TableAction, extra?: TableActionOptions) =>
+    request<DiningTable>(`/api/tables/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action, ...extra }),
+    }),
   transferTable: (id: string, toNumber: number) =>
     request<{ from: DiningTable; to: DiningTable }>(`/api/tables/${id}/transfer`, {
       method: "POST",
@@ -164,4 +170,13 @@ export const api = {
   updateStaff: (id: string, body: { name: string; username: string; password?: string }) =>
     request<StaffAccount>(`/api/staff/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteStaff: (id: string) => request<void>(`/api/staff/${id}`, { method: "DELETE" }),
+  getPromotions: () => request<Promotion[]>("/api/promotions"),
+  getAllPromotions: () => request<Promotion[]>("/api/promotions/all"),
+  createPromotion: (body: PromotionInput) =>
+    request<Promotion>("/api/promotions", { method: "POST", body: JSON.stringify(body) }),
+  updatePromotion: (id: string, body: PromotionInput) =>
+    request<Promotion>(`/api/promotions/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  setPromotionActive: (id: string, active: boolean) =>
+    request<Promotion>(`/api/promotions/${id}`, { method: "PATCH", body: JSON.stringify({ active }) }),
+  deletePromotion: (id: string) => request<void>(`/api/promotions/${id}`, { method: "DELETE" }),
 };

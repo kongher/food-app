@@ -21,6 +21,8 @@ const orderSchema = new Schema<Order>(
     items: { type: [orderItemSchema], required: true },
     total: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ["pending", "completed"], default: "pending", index: true },
+    paymentMethod: { type: String, enum: ["cash", "transfer"], required: false },
+    paidAt: { type: String, required: false },
     createdAt: { type: String, required: true },
   },
   { versionKey: false, collection: "orders" },

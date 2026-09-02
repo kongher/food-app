@@ -1,4 +1,5 @@
 export type OrderStatus = "pending" | "completed";
+export type PaymentMethod = "cash" | "transfer";
 
 export interface Category {
   id: string;
@@ -22,6 +23,25 @@ export interface Shop {
   updatedAt: string;
 }
 
+export interface Promotion {
+  id: string;
+  title: string;
+  body: string;
+  code: string;
+  image: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromotionInput {
+  title: string;
+  body: string;
+  code: string;
+  image: string;
+  active: boolean;
+}
+
 export interface MenuResponse {
   categories: Category[];
   products: Product[];
@@ -42,7 +62,13 @@ export interface Order {
   items: OrderItem[];
   total: number;
   status: OrderStatus;
+  paymentMethod?: PaymentMethod;
+  paidAt?: string;
   createdAt: string;
+}
+
+export interface TableActionOptions {
+  paymentMethod?: PaymentMethod;
 }
 
 export interface CartItem {
@@ -87,6 +113,7 @@ export interface PublicTableStatus {
   status: GuestTableStatus;
   canOrder: boolean;
   canCall: boolean;
+  sessionId: string | null;
 }
 
 export interface StaffAccount {

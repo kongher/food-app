@@ -1,8 +1,9 @@
 import QRCode from "qrcode";
 import { displayOrderCode } from "./orderCode";
 import { formatTime, formatVnd } from "./format";
+import { PAYMENT_METHOD_LABEL } from "./payment";
 import { tableBillCode } from "./tableBill";
-import type { Order, OrderItem } from "../types";
+import type { Order, OrderItem, PaymentMethod } from "../types";
 
 const THERMAL_BILL_ID = "thermal-bill-root";
 
@@ -23,6 +24,7 @@ export async function printOrderBill(order: Order, shop: { name: string; logo?: 
     codeLabel: "ລະຫັດອໍເດີ",
     items: order.items,
     total: order.total,
+    paymentMethod: order.paymentMethod,
   });
 }
 
@@ -59,6 +61,7 @@ async function printBillHtml({
   codeLabel,
   items,
   total,
+  paymentMethod,
 }: {
   shop: { name: string; logo?: string };
   code: string;
@@ -67,6 +70,7 @@ async function printBillHtml({
   codeLabel: string;
   items: OrderItem[];
   total: number;
+  paymentMethod?: PaymentMethod;
 }): Promise<void> {
   const qr = await QRCode.toDataURL(code, { width: 240, margin: 1, errorCorrectionLevel: "M" });
   const rows = items
@@ -128,6 +132,7 @@ async function printBillHtml({
       <div><strong>${escapeHtml(codeLabel)}:</strong> ${escapeHtml(code)}</div>
       <div><strong>ໂຕະ:</strong> ${tableNumber}</div>
       <div><strong>ເວລາ:</strong> ${escapeHtml(timeLabel)}</div>
+      ${paymentMethod ? `<div><strong>ຊຳລະ:</strong> ${escapeHtml(PAYMENT_METHOD_LABEL[paymentMethod])}</div>` : ""}
       <hr />
       <table>${rows}</table>
       <hr />

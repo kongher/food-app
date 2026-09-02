@@ -1,6 +1,7 @@
 export { CategoryModel } from "./category.js";
 export { OrderModel } from "./order.js";
 export { ProductModel } from "./product.js";
+export { PromotionModel } from "./promotion.js";
 export { ShopModel } from "./shop.js";
 export { SongRequestModel } from "./songRequest.js";
 export { StaffCallModel } from "./staffCall.js";

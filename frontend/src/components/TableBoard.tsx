@@ -2,9 +2,10 @@ import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import { api } from "../api";
 import { formatClock, formatElapsed } from "../lib/format";
+import { billTotal, mergeOrderItems, sessionOrdersForTable } from "../lib/tableBill";
 import { menuUrlForTable } from "../lib/tableSession";
-import { sessionOrdersForTable } from "../lib/tableBill";
-import type { Category, DiningTable, Order, Product, Shop, TableAction } from "../types";
+import type { Category, DiningTable, Order, PaymentMethod, Product, Shop, TableAction, TableActionOptions } from "../types";
+import { CloseTablePaymentModal } from "./CloseTablePaymentModal";
 import { AddOrderItemDialog } from "./OrderCard";
 import { TableSessionBill } from "./TableSessionBill";
 
@@ -18,7 +19,7 @@ interface BoardProps {
   shop?: Shop;
   onAdd?: (number: number) => Promise<void>;
   onDelete?: (table: DiningTable) => Promise<void>;
-  onAction?: (table: DiningTable, action: TableAction) => Promise<void>;
+  onAction?: (table: DiningTable, action: TableAction, extra?: TableActionOptions) => Promise<void>;
   onTransfer?: (table: DiningTable, toNumber: number) => Promise<void>;
   onOrderUpdated?: (order: Order) => void;
   onOrderRemoved?: (id: string) => void;
@@ -215,7 +216,7 @@ export function TableBoard({
           categories={categories}
           shop={shop}
           onClose={() => setSelected(null)}
-          onAction={onAction ? (action) => onAction(selected, action) : undefined}
+          onAction={onAction ? (action, extra) => onAction(selected, action, extra) : undefined}
           onTransfer={onTransfer ? (toNumber) => onTransfer(selected, toNumber) : undefined}
           onDelete={onDelete ? () => onDelete(selected) : undefined}
           onOrderUpdated={onOrderUpdated}
@@ -249,7 +250,7 @@ function TableQrModal({
   categories?: Category[];
   shop?: Shop;
   onClose: () => void;
-  onAction?: (action: TableAction) => Promise<void>;
+  onAction?: (action: TableAction, extra?: TableActionOptions) => Promise<void>;
   onTransfer?: (toNumber: number) => Promise<void>;
   onDelete?: () => Promise<void>;
   onOrderUpdated?: (order: Order) => void;
@@ -268,15 +269,19 @@ function TableQrModal({
   const [actionError, setActionError] = useState("");
   const [addingFirst, setAddingFirst] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [showPay, setShowPay] = useState(false);
   const busy = Boolean(acting) || deleting || transferring || creating;
   const tone = tableTone(table);
   const emptyTargets = tables.filter((item) => item.id !== table.id && !item.occupied && !item.locked);
   const sessionOrders = sessionOrdersForTable(orders, table.occupiedAt);
+  const sessionTotal = billTotal(mergeOrderItems(sessionOrders));
+  const needsPayment = table.occupied && sessionTotal > 0;
 
   useEffect(() => {
     setShowTransfer(false);
     setToNumber("");
     setActionError("");
+    setShowPay(false);
   }, [table.id]);
 
   useEffect(() => {
@@ -297,18 +302,32 @@ function TableQrModal({
     link.click();
   }
 
-  async function run(action: TableAction) {
+  async function run(action: TableAction, extra?: TableActionOptions) {
     if (!onAction) return;
     setActing(action);
     setActionError("");
     try {
-      await onAction(action);
+      await onAction(action, extra);
+      setShowPay(false);
       onClose();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "ອັບເດດໂຕະບໍ່ສຳເລັດ.");
     } finally {
       setActing("");
     }
+  }
+
+  function requestClose() {
+    if (needsPayment) {
+      setActionError("");
+      setShowPay(true);
+      return;
+    }
+    void run("close");
+  }
+
+  function confirmPayment(paymentMethod: PaymentMethod) {
+    void run("close", { paymentMethod });
   }
 
   async function confirmTransfer() {
@@ -365,7 +384,7 @@ function TableQrModal({
     <div
       className="fixed inset-0 z-[80] flex items-end justify-center bg-black/40 px-4 sm:items-center"
       onClick={() => {
-        if (!confirmDelete && !addingFirst) onClose();
+        if (!confirmDelete && !addingFirst && !showPay) onClose();
       }}
     >
       <div
@@ -446,7 +465,7 @@ function TableQrModal({
             ຂະຫຍາຍໃຫ້ສະແກນ
           </button>
         </div>
-        {actionError && <p className="mt-2 rounded-2xl bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
+        {actionError && !showPay && <p className="mt-2 rounded-2xl bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
         {onAction && (
           <div className="mt-2 grid grid-cols-2 gap-2">
             {table.occupied ? (
@@ -499,10 +518,14 @@ function TableQrModal({
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => void run("close")}
+                  onClick={requestClose}
                   className="col-span-2 rounded-2xl bg-emerald-600 py-3 text-sm font-semibold text-white disabled:opacity-40"
                 >
-                  {acting === "close" ? "ກຳລັງປິດ..." : "ປິດໂຕະ"}
+                  {acting === "close"
+                    ? "ກຳລັງປິດ..."
+                    : needsPayment
+                      ? "ຢືນຢັນຊຳລະ ແລະ ປິດໂຕະ"
+                      : "ປິດໂຕະ"}
                 </button>
               </>
             ) : (
@@ -552,6 +575,20 @@ function TableQrModal({
           </button>
         )}
       </div>
+      {showPay && (
+        <CloseTablePaymentModal
+          tableNumber={table.number}
+          total={sessionTotal}
+          submitting={acting === "close"}
+          error={actionError}
+          onConfirm={confirmPayment}
+          onCancel={() => {
+            if (acting === "close") return;
+            setShowPay(false);
+            setActionError("");
+          }}
+        />
+      )}
       {addingFirst && (
         <AddOrderItemDialog
           products={products}

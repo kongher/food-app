@@ -7,6 +7,7 @@ import { OrderCard } from "../components/OrderCard";
 import { ShopBrand } from "../components/ShopBrand";
 import { SongRequestsBoard } from "../components/SongRequestsBoard";
 import { StaffAccountsBoard } from "../components/StaffAccountsBoard";
+import { PromotionsBoard } from "../components/PromotionsBoard";
 import { TableBoard } from "../components/TableBoard";
 import { useShop } from "../context/ShopContext";
 import { logoutAdmin } from "../lib/adminAuth";
@@ -40,10 +41,12 @@ import {
   toDisplayDate,
 } from "../lib/format";
 import { matchesOrderSearch } from "../lib/orderCode";
-import type { Category, DiningTable, Order, Product, ProductInput, SongRequest, StaffCall, TableAction } from "../types";
+import { orderReportAt, PAYMENT_METHOD_LABEL } from "../lib/payment";
+import type { Category, DiningTable, Order, Product, ProductInput, SongRequest, StaffCall, TableAction, TableActionOptions } from "../types";
 
-type Tab = "orders" | "calls" | "songs" | "tables" | "reports" | "menu" | "staff" | "settings";
+type Tab = "orders" | "calls" | "songs" | "tables" | "reports" | "menu" | "promos" | "staff" | "settings";
 type ReportPreset = "today" | "yesterday" | "last7" | "month" | "custom";
+type ReportPayFilter = "all" | "cash" | "transfer";
 
 const emptyForm: ProductInput = {
   name: "",
@@ -89,6 +92,7 @@ export function AdminPage() {
   const [appliedTo, setAppliedTo] = useState(() => toDateInputValue(new Date()));
   const [filterError, setFilterError] = useState("");
   const [historyQuery, setHistoryQuery] = useState("");
+  const [reportPayFilter, setReportPayFilter] = useState<ReportPayFilter>("all");
   const [soundEnabled, setSoundEnabled] = useState(() => isOrderSoundEnabled());
   const [soundSettingsOpen, setSoundSettingsOpen] = useState(false);
   const [voiceRateDraft, setVoiceRateDraft] = useState(() => getVoiceRate());
@@ -173,13 +177,20 @@ export function AdminPage() {
     setMessage(`ລຶບໂຕະ ${table.number} ແລ້ວ.`);
   }
 
-  async function setTableStatus(table: DiningTable, action: TableAction) {
+  async function setTableStatus(table: DiningTable, action: TableAction, extra?: TableActionOptions) {
     setError("");
-    await api.setTableAction(table.id, action);
+    await api.setTableAction(table.id, action, extra);
     await loadTables();
+    if (action === "close") await loadOrders();
+    const payLabel =
+      extra?.paymentMethod === "cash"
+        ? " · ເງິນສົດ"
+        : extra?.paymentMethod === "transfer"
+          ? " · ໂອນເງິນ"
+          : "";
     const messages: Record<TableAction, string> = {
       open: `ເປີດໂຕະ ${table.number} ແລ້ວ.`,
-      close: `ປິດໂຕະ ${table.number} ແລ້ວ.`,
+      close: `ປິດໂຕະ ${table.number} ແລ້ວ${payLabel}.`,
       lock: `ລັອກໂຕະ ${table.number} ແລ້ວ.`,
       unlock: `ປົດລັອກໂຕະ ${table.number} ແລ້ວ.`,
     };
@@ -591,7 +602,7 @@ export function AdminPage() {
 
   const filteredOrders = useMemo(() => {
     if (!reportRange) return [];
-    return completedOrders.filter((order) => isInLocalRange(order.createdAt, reportRange.start, reportRange.end));
+    return completedOrders.filter((order) => isInLocalRange(orderReportAt(order), reportRange.start, reportRange.end));
   }, [completedOrders, reportRange]);
 
   const filteredRevenue = useMemo(
@@ -599,12 +610,34 @@ export function AdminPage() {
     [filteredOrders],
   );
 
+  const cashRevenue = useMemo(
+    () => filteredOrders.filter((order) => order.paymentMethod === "cash").reduce((sum, order) => sum + order.total, 0),
+    [filteredOrders],
+  );
+
+  const transferRevenue = useMemo(
+    () =>
+      filteredOrders.filter((order) => order.paymentMethod === "transfer").reduce((sum, order) => sum + order.total, 0),
+    [filteredOrders],
+  );
+
+  const cashCount = useMemo(
+    () => filteredOrders.filter((order) => order.paymentMethod === "cash").length,
+    [filteredOrders],
+  );
+
+  const transferCount = useMemo(
+    () => filteredOrders.filter((order) => order.paymentMethod === "transfer").length,
+    [filteredOrders],
+  );
+
   const listedOrders = useMemo(() => {
-    if (historyQuery.trim()) {
-      return completedOrders.filter((order) => matchesOrderSearch(order, historyQuery));
-    }
-    return filteredOrders;
-  }, [completedOrders, filteredOrders, historyQuery]);
+    const base = historyQuery.trim()
+      ? completedOrders.filter((order) => matchesOrderSearch(order, historyQuery))
+      : filteredOrders;
+    if (reportPayFilter === "all") return base;
+    return base.filter((order) => order.paymentMethod === reportPayFilter);
+  }, [completedOrders, filteredOrders, historyQuery, reportPayFilter]);
 
   const reportLabel =
     reportPreset === "today"
@@ -751,6 +784,9 @@ export function AdminPage() {
             </TabButton>
             <TabButton active={tab === "menu"} onClick={() => setTab("menu")}>
               ເມນູ
+            </TabButton>
+            <TabButton active={tab === "promos"} onClick={() => setTab("promos")}>
+              ໂປຣໂມຊັນ
             </TabButton>
             <TabButton active={tab === "staff"} onClick={() => setTab("staff")}>
               ພະນັກງານ
@@ -983,11 +1019,41 @@ export function AdminPage() {
               {filterError && <p className="mt-2 text-sm text-red-600">{filterError}</p>}
             </div>
 
-            <article className="mb-6 rounded-3xl bg-white p-5 shadow-sm">
-              <p className="text-sm font-medium text-stone-500">ຍອດຂາຍ · {reportLabel}</p>
-              <p className="font-display mt-2 text-3xl text-orange-700">{formatVnd(filteredRevenue)}</p>
-              <p className="mt-1 text-xs text-stone-400">{filteredOrders.length} ອໍເດີສຳເລັດ</p>
-            </article>
+            <div className="mb-6 grid gap-3 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => setReportPayFilter("all")}
+                className={`rounded-3xl bg-white p-5 text-left shadow-sm ${
+                  reportPayFilter === "all" ? "ring-2 ring-orange-400" : ""
+                }`}
+              >
+                <p className="text-sm font-medium text-stone-500">ຍອດຂາຍ · {reportLabel}</p>
+                <p className="font-display mt-2 text-2xl text-orange-700 sm:text-3xl">{formatVnd(filteredRevenue)}</p>
+                <p className="mt-1 text-xs text-stone-400">{filteredOrders.length} ອໍເດີສຳເລັດ</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportPayFilter("cash")}
+                className={`rounded-3xl bg-white p-5 text-left shadow-sm ${
+                  reportPayFilter === "cash" ? "ring-2 ring-emerald-400" : ""
+                }`}
+              >
+                <p className="text-sm font-medium text-stone-500">{PAYMENT_METHOD_LABEL.cash}</p>
+                <p className="font-display mt-2 text-2xl text-emerald-700 sm:text-3xl">{formatVnd(cashRevenue)}</p>
+                <p className="mt-1 text-xs text-stone-400">{cashCount} ອໍເດີ</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportPayFilter("transfer")}
+                className={`rounded-3xl bg-white p-5 text-left shadow-sm ${
+                  reportPayFilter === "transfer" ? "ring-2 ring-sky-400" : ""
+                }`}
+              >
+                <p className="text-sm font-medium text-stone-500">{PAYMENT_METHOD_LABEL.transfer}</p>
+                <p className="font-display mt-2 text-2xl text-sky-700 sm:text-3xl">{formatVnd(transferRevenue)}</p>
+                <p className="mt-1 text-xs text-stone-400">{transferCount} ອໍເດີ</p>
+              </button>
+            </div>
 
             <h3 className="font-display mb-3 text-lg text-stone-900">ປະຫວັດອໍເດີສຳເລັດ</h3>
             <label className="relative mb-4 block">
@@ -1013,7 +1079,13 @@ export function AdminPage() {
             </label>
             {listedOrders.length === 0 && (
               <p className="rounded-3xl bg-white p-8 text-center text-stone-500">
-                {historyQuery.trim() ? "ບໍ່ພົບອໍເດີທີ່ຄົ້ນຫາ." : "ບໍ່ມີອໍເດີສຳເລັດໃນຊ່ວງນີ້."}
+                {historyQuery.trim()
+                  ? "ບໍ່ພົບອໍເດີທີ່ຄົ້ນຫາ."
+                  : reportPayFilter === "cash"
+                    ? "ບໍ່ມີອໍເດີຈ່າຍເງິນສົດໃນຊ່ວງນີ້."
+                    : reportPayFilter === "transfer"
+                      ? "ບໍ່ມີອໍເດີໂອນເງິນໃນຊ່ວງນີ້."
+                      : "ບໍ່ມີອໍເດີສຳເລັດໃນຊ່ວງນີ້."}
               </p>
             )}
             <div className="space-y-4">
@@ -1273,6 +1345,8 @@ export function AdminPage() {
             </div>
           </section>
         )}
+
+        {tab === "promos" && <PromotionsBoard onMessage={setMessage} onError={setError} />}
 
         {tab === "staff" && <StaffAccountsBoard onMessage={setMessage} onError={setError} />}
 

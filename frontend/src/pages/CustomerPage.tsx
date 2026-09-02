@@ -4,11 +4,13 @@ import { api } from "../api";
 import { ShopWelcome } from "../components/ShopWelcome";
 import { CustomerBottomNav, type CustomerNavTab } from "../components/CustomerBottomNav";
 import { GuestMusicPanel } from "../components/GuestMusicPanel";
+import { GuestPromotionsPanel } from "../components/GuestPromotionsPanel";
 import { useCart } from "../context/CartContext";
 import { formatTime, formatVnd, onImgError } from "../lib/format";
 import { displayOrderCode } from "../lib/orderCode";
 import { isValidTableNumber, saveTableNumber, tableMenuPath } from "../lib/tableSession";
 import { adminEntryPath, isAdminLoggedIn } from "../lib/session";
+import { clearGuestOrders, loadGuestOrders, saveGuestOrders } from "../lib/guestOrders";
 import type { Category, Order, Product, PublicTableStatus, StaffCallReason } from "../types";
 
 const NOTE_PRESETS = [
@@ -25,25 +27,6 @@ const CALL_REASONS: { id: "payment" | "refill" | "other"; label: string }[] = [
   { id: "refill", label: "ເພີ່ມນ້ຳລົ້າ/ນ້ຳກ້ອນ" },
   { id: "other", label: "ຕ້ອງການຄວາມຊ່ວຍເຫຼືອອື່ນ" },
 ];
-
-function guestOrdersKey(table: number) {
-  return `food-app-guest-orders:${table}`;
-}
-
-function loadGuestOrders(table: number): Order[] {
-  try {
-    const raw = localStorage.getItem(guestOrdersKey(table));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Order[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveGuestOrders(table: number, orders: Order[]) {
-  localStorage.setItem(guestOrdersKey(table), JSON.stringify(orders.slice(0, 40)));
-}
 
 function matchesQuery(product: Product, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -108,6 +91,7 @@ export function CustomerMenu({
   const [guestTab, setGuestTab] = useState<CustomerNavTab>("menu");
   const [myOrders, setMyOrders] = useState<Order[]>([]);
   const wasOccupied = useRef(false);
+  const guestSessionId = useRef<string | null>(null);
 
   const { items, count, total, addItem, setQuantity, removeItem, clear } = useCart();
 
@@ -125,7 +109,8 @@ export function CustomerMenu({
     setStatusError("");
     setBrowseNotice(false);
     setGuestTab("menu");
-    setMyOrders(isStaff || !isValidTableNumber(tableNumber) ? [] : loadGuestOrders(tableNumber));
+    setMyOrders([]);
+    guestSessionId.current = null;
   }, [isStaff, tableNumber]);
 
   useEffect(() => {
@@ -142,8 +127,22 @@ export function CustomerMenu({
           setCartOpen(false);
           setCallOpen(false);
           setDraftProduct(null);
+          clearGuestOrders(tableNumber);
+          setMyOrders([]);
+          guestSessionId.current = null;
         }
-        if (data.status === "occupied") wasOccupied.current = true;
+        if (data.status === "occupied") {
+          wasOccupied.current = true;
+          const sessionId = data.sessionId;
+          if (guestSessionId.current !== sessionId) {
+            guestSessionId.current = sessionId;
+            setMyOrders(loadGuestOrders(tableNumber, sessionId));
+          }
+        } else if (!wasOccupied.current) {
+          clearGuestOrders(tableNumber);
+          setMyOrders([]);
+          guestSessionId.current = null;
+        }
         setTableStatus(data);
         setStatusError("");
       } catch (err) {
@@ -252,7 +251,7 @@ export function CustomerMenu({
       });
       setMyOrders((current) => {
         const next = [created, ...current];
-        saveGuestOrders(tableNumber, next);
+        if (tableStatus?.sessionId) saveGuestOrders(tableNumber, tableStatus.sessionId, next);
         return next;
       });
       clear();
@@ -479,13 +478,7 @@ export function CustomerMenu({
         {!isStaff && guestTab === "music" && (
           <GuestMusicPanel tableNumber={tableNumber} canRequest={canCall} browseMessage={browseMessage} />
         )}
-        {!isStaff && guestTab === "promo" && (
-          <article className="rounded-3xl bg-white p-8 text-center shadow-sm">
-            <p className="text-4xl">🏷️</p>
-            <h2 className="font-display mt-3 text-2xl text-stone-900">ໂປຣໂມຊັນ / ສ່ວນຫຼຸດ</h2>
-            <p className="mt-2 text-sm text-stone-500">ຍັງບໍ່ມີໂປຣໂມຊັນໃນຂະນະນີ້.</p>
-          </article>
-        )}
+        {!isStaff && guestTab === "promo" && <GuestPromotionsPanel />}
       </main>
 
       {(canOrder || isAdminPreview) && count > 0 && !cartOpen && (
